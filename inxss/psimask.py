@@ -2,6 +2,7 @@ import pickle
 import torch
 import numpy as np
 from tqdm import tqdm
+from scipy.interpolate import RegularGridInterpolator
 
 try:
     import cupy as xp
@@ -12,7 +13,7 @@ except ImportError:
     from scipy.ndimage import map_coordinates
     using_cupy = False
 
-def downsample_4d_with_map_coordinates(mask, scale_factors, order=0):
+def downsample_4d_with_map_coordinates(mask, scale_factors, shrink_factor=0., order=0):
     mask = xp.asarray(mask.astype(xp.float32))
     if isinstance(scale_factors, (int, float)):
         scale_factors = [scale_factors] * 4
@@ -25,10 +26,10 @@ def downsample_4d_with_map_coordinates(mask, scale_factors, order=0):
 
     # Create a grid of coordinates in the old mask
     coord_grid = xp.array(xp.meshgrid(
-        xp.linspace(0, mask.shape[0] - 1, new_dims[0]),
-        xp.linspace(0, mask.shape[1] - 1, new_dims[1]),
-        xp.linspace(0, mask.shape[2] - 1, new_dims[2]),
-        xp.linspace(0, mask.shape[3] - 1, new_dims[3]),
+        xp.linspace(shrink_factor/2 * mask.shape[0], (1 - shrink_factor/2) * mask.shape[0]  - 1, new_dims[0]),
+        xp.linspace(shrink_factor/2 * mask.shape[1], (1 - shrink_factor/2) * mask.shape[1] - 1, new_dims[1]),
+        xp.linspace(shrink_factor/2 * mask.shape[2], (1 - shrink_factor/2) * mask.shape[2] - 1, new_dims[2]),
+        xp.linspace(shrink_factor/2 * mask.shape[3], (1 - shrink_factor/2) * mask.shape[3] - 1, new_dims[3]),
         indexing='ij'
     ))
 
@@ -40,7 +41,7 @@ def downsample_4d_with_map_coordinates(mask, scale_factors, order=0):
     downsampled_mask = downsampled_mask > 0.5
     return downsampled_mask
 
-def downsample_1d_with_map_coordinates(grid, scale_factor):
+def downsample_1d_with_map_coordinates(grid, scale_factor, shrink_factor=0.):
     grid = xp.asarray(grid.astype(xp.float32))
     
     if not isinstance(scale_factor, (int, float)):
@@ -50,7 +51,7 @@ def downsample_1d_with_map_coordinates(grid, scale_factor):
     
     coord_grid = xp.array(
         xp.meshgrid(
-            xp.linspace(0, grid.shape[0] - 1, new_dim),
+            xp.linspace(shrink_factor/2 * grid.shape[0], (1 - shrink_factor/2) * grid.shape[0] - 1, new_dim),
             indexing='ij'
     ))
     if using_cupy:
@@ -63,7 +64,7 @@ class PsiMask:
     """
     Written with help from OpenAI's ChatGPT (GPT-4.0).
     """
-    def __init__(self, folder_path, scale_factor=None, device='cpu', preload=True):
+    def __init__(self, folder_path, scale_factor=None, shrink_factor=0., device='cpu', preload=True):
         """
         :param folder_path: Folder containing the .pkl mask files
         :param device: Either 'cpu' or 'cuda' to determine where masks are stored
@@ -81,7 +82,7 @@ class PsiMask:
                 with open(f'{self.folder_path}/{i}.pkl', 'rb') as f:
                     _mask = pickle.load(f)['coverage']
                     if scale_factor is not None:
-                        _mask = downsample_4d_with_map_coordinates(_mask, scale_factor)
+                        _mask = downsample_4d_with_map_coordinates(_mask, scale_factor, shrink_factor=shrink_factor)
                     self.masks[i] = torch.tensor(_mask, dtype=torch.bool).to(device)
         else:
             self.masks = None
@@ -93,15 +94,29 @@ class PsiMask:
             if scale_factor is not None:
                 if using_cupy:
                     _grid = xp.asarray(_grid)
-                    _grid = downsample_1d_with_map_coordinates(_grid, scale_factor)
+                    _grid = downsample_1d_with_map_coordinates(_grid, scale_factor, shrink_factor=shrink_factor)
                     _grid = xp.asnumpy(_grid)
                 else:
-                    _grid = downsample_1d_with_map_coordinates(_grid, scale_factor)
-            print(_key)
+                    _grid = downsample_1d_with_map_coordinates(_grid, scale_factor, shrink_factor=shrink_factor)
+            # print(_key)
             setattr(self, _key, torch.from_numpy(_grid).to(device))
-            
-            
-    
+        
+        self.psi_grid = torch.arange(360).to(self.h_grid)
+        # masks = []
+        # for _angle in tqdm(range(360)):
+        #     masks.append(self.get_mask(_angle))
+        # masks = torch.stack(masks)
+        
+        # self.psi_mask_func = RegularGridInterpolator(
+        #     [self.psi_grid.cpu().numpy(), self.h_grid.cpu().numpy(), 
+        #      self.k_grid.cpu().numpy(), self.l_grid.cpu().numpy(), self.w_grid.cpu().numpy()
+        #     ], masks.numpy(), bounds_error=False, fill_value=0.)
+        
+        self.hklw_grid = torch.moveaxis(
+            torch.stack(torch.meshgrid(self.h_grid, self.k_grid, self.l_grid, self.w_grid, indexing='ij'), dim=0), 0, -1)
+        self.hkw_grid = torch.moveaxis(
+            torch.stack(torch.meshgrid(self.h_grid, self.k_grid, self.w_grid, indexing='ij'), dim=0), 0, -1)
+        
     def scale_mask(self, mask):
         if self.scale_factor is None:
             return mask
@@ -147,3 +162,23 @@ class PsiMask:
         
         mask = mask > 0.5
         return mask
+    
+    def get_model_input(self, param, grid='hkw'):
+        if grid == 'hklw':
+            param = param.squeeze()[None, None, None, None, :].expand(self.hklw_grid.shape[:-1]+(-1,))
+            coords = torch.cat([self.hklw_grid.to(param)[...,[0,1,3]], param], dim=-1)
+            return coords, self.hklw_grid.to(param)[...,[2]]
+        elif grid == 'hkw':
+            param = param.squeeze()[None, None, None, :].expand(self.hkw_grid.shape[:-1]+(-1,))
+            coords = torch.cat([self.hkw_grid.to(param), param], dim=-1)
+            return coords
+        
+    
+#     def __call__(self, coords):
+#         if isinstance(coords, torch.Tensor):
+#             coords = coords.detach().cpu().numpy()
+#         elif isinstance(coords, list):
+#             coords = np.array(list)
+          
+#         coords[...,0] = coords[...,0] % 360
+#         return self.psi_mask_func(coords)

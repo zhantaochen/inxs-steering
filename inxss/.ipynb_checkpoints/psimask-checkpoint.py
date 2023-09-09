@@ -2,6 +2,7 @@ import pickle
 import torch
 import numpy as np
 from tqdm import tqdm
+from scipy.interpolate import RegularGridInterpolator
 
 try:
     import cupy as xp
@@ -16,7 +17,6 @@ def downsample_4d_with_map_coordinates(mask, scale_factors, order=0):
     mask = xp.asarray(mask.astype(xp.float32))
     if isinstance(scale_factors, (int, float)):
         scale_factors = [scale_factors] * 4
-    
     # Ensure the scale_factors is a tuple/list of length 4
     if not isinstance(scale_factors, (tuple, list)) or len(scale_factors) != 4:
         raise ValueError("scale_factors should be a tuple or list of length 4")
@@ -98,16 +98,36 @@ class PsiMask:
                     _grid = xp.asnumpy(_grid)
                 else:
                     _grid = downsample_1d_with_map_coordinates(_grid, scale_factor)
+            # print(_key)
             setattr(self, _key, torch.from_numpy(_grid).to(device))
-    
+        
+        self.psi_grid = torch.arange(360).to(self.h_grid)
+        # masks = []
+        # for _angle in tqdm(range(360)):
+        #     masks.append(self.get_mask(_angle))
+        # masks = torch.stack(masks)
+        
+        # self.psi_mask_func = RegularGridInterpolator(
+        #     [self.psi_grid.cpu().numpy(), self.h_grid.cpu().numpy(), 
+        #      self.k_grid.cpu().numpy(), self.l_grid.cpu().numpy(), self.w_grid.cpu().numpy()
+        #     ], masks.numpy(), bounds_error=False, fill_value=0.)
+        
+        self.hklw_grid = torch.moveaxis(
+            torch.stack(torch.meshgrid(self.h_grid, self.k_grid, self.l_grid, self.w_grid, indexing='ij'), dim=0), 0, -1)
+        self.hkw_grid = torch.moveaxis(
+            torch.stack(torch.meshgrid(self.h_grid, self.k_grid, self.w_grid, indexing='ij'), dim=0), 0, -1)
+        
     def scale_mask(self, mask):
-        if using_cupy:
-            mask = xp.asarray(mask)
-            mask = downsample_4d_with_map_coordinates(mask, self.scale_factor)
-            mask = xp.asnumpy(mask)
+        if self.scale_factor is None:
+            return mask
         else:
-            mask = downsample_4d_with_map_coordinates(mask, self.scale_factor)
-        return mask
+            if using_cupy:
+                mask = xp.asarray(mask)
+                mask = downsample_4d_with_map_coordinates(mask, self.scale_factor)
+                mask = xp.asnumpy(mask)
+            else:
+                mask = downsample_4d_with_map_coordinates(mask, self.scale_factor)
+            return mask
 
     def get_mask(self, degree):
         """
@@ -141,14 +161,19 @@ class PsiMask:
             mask = (1 - alpha) * lower_mask + alpha * upper_mask
         
         mask = mask > 0.5
-        
-#         if (self.scale_factor is not None) and (not self.preload):
-#             if using_cupy:
-#                 mask = xp.asarray(mask)
-#                 mask = downsample_4d_with_map_coordinates(mask, self.scale_factor)
-#                 mask = xp.asnumpy(mask)
-#             else:
-#                 mask = downsample_4d_with_map_coordinates(mask, self.scale_factor)
-
-        mask = torch.tensor(mask, dtype=torch.bool).to(self.device)
         return mask
+    
+    def get_model_input(self, param):
+        param = param.squeeze()[None, None, None, :].expand(self.hkw_grid.shape[:-1]+(-1,))
+        coords = torch.cat([self.hkw_grid.to(param), param], dim=-1)
+        return coords
+        
+    
+#     def __call__(self, coords):
+#         if isinstance(coords, torch.Tensor):
+#             coords = coords.detach().cpu().numpy()
+#         elif isinstance(coords, list):
+#             coords = np.array(list)
+          
+#         coords[...,0] = coords[...,0] % 360
+#         return self.psi_mask_func(coords)

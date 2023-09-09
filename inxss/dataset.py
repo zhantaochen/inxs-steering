@@ -11,9 +11,9 @@ class SpectrumDataset(Dataset):
         # self.data_dict['Szz'] = self.data_dict['Szz'] / (
         #     self.data_dict['Szz'].amax(dim=(1,2), keepdims=True) + 1e-15)
         self.num_wq = num_wq
-        self.data_dict['params'][:,0] = self.scale_tensor(self.data_dict['params'][:,0], (20, 40), (0.0, 0.5))
-        self.data_dict['params'][:,1] = self.scale_tensor(self.data_dict['params'][:,1], (-5, 5), (0.0, 0.5))
-        self.data_dict['w_grid'] = self.scale_tensor(self.data_dict['w_grid'], (0, 150), (0.0, 0.5))
+        # self.data_dict['params'][:,0] = self.scale_tensor(self.data_dict['params'][:,0], (20, 40), (0.0, 0.5))
+        # self.data_dict['params'][:,1] = self.scale_tensor(self.data_dict['params'][:,1], (-5, 5), (0.0, 0.5))
+        # self.data_dict['w_grid'] = self.scale_tensor(self.data_dict['w_grid'], (0, 150), (0.0, 0.5))
         
     def __len__(self):
         return self.data_dict['Syy'].size(0)
@@ -27,7 +27,7 @@ class SpectrumDataset(Dataset):
         w = self.data_dict['w_grid'][None,nw_indices]
         q = self.data_dict['q_grid'][:2,nq_indices]
         p = self.data_dict['params'][index,None].T.repeat(1, self.num_wq)
-        x = torch.transpose(torch.cat((w, q, p), dim=0), 1, 0)
+        x = torch.transpose(torch.cat((q, w, p), dim=0), 1, 0)
         # Index into the tensor to get the random nw by nq sample
         Syy = self.data_dict['Syy'][index, nw_indices, nq_indices, None]
         Szz = self.data_dict['Szz'][index, nw_indices, nq_indices, None]

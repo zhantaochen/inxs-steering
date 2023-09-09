@@ -33,19 +33,27 @@ def calc_Sqw_from_SpinW_results(Q, Syy, Szz):
         )
     return S
 
-def calc_Sqw_from_Syy_Szz(wQ, Syy_func, Szz_func):
+def calc_Sqw_from_Syy_Szz(Qw, Syy_func, Szz_func):
     a = 3.89 # lattice vector in Angstroem in square-lattice notation
     c = 12.55 # lattice vector in Angstroem in square-lattice notation
-    w, H, K, L = wQ[...,0], wQ[...,1], wQ[...,2], wQ[...,3]
+    H, K, L, w = Qw[...,0], Qw[...,1], Qw[...,2], Qw[...,3]
     QL = 2 * np.pi * L / c # Out of plane component of the scattering vector
     Q = 2 * np.pi * np.sqrt((H**2 + K**2) / a**2 + L**2 / c**2) # Scattering vector in Angstroem^-1
     
-    h = np.abs(H - np.round(H)) # Reduced reciprocal lattice vectors projected into the first quadrant of the Brillouin zone
-    k = np.abs(K - np.round(K))
-    # l = np.abs(L - np.round(L))
-    l = np.zeros(L.shape)
-        
+    # h = np.abs(H - np.round(H)) # Reduced reciprocal lattice vectors projected into the first quadrant of the Brillouin zone
+    # k = np.abs(K - np.round(K))
+    # # l = np.abs(L - np.round(L))
+    # l = np.zeros(L.shape)
+
+    _Qw = Qw.clone()
+    _Qw[...,:3] = np.abs(_Qw[...,:3] - np.round(_Qw[...,:3]))
+    
+    # S = Szz_func(_Qw[...,[0,1,3]])
     S = (np.abs(formfact(Q,H,K,L,a,c))**2) * (
-            (1 + (QL/(Q+1e-15))**2) / 2 * Syy_func(wQ[...,:3]) + (1 - (QL/(Q+1e-15))**2) * Szz_func(wQ[...,:3])
+            (1 + (QL/(Q+1e-15))**2) / 2 * Syy_func(_Qw[...,[0,1,3]]) + (1 - (QL/(Q+1e-15))**2) * Szz_func(_Qw[...,[0,1,3]])
         )
+    # S = (np.abs(formfact(Q,H,K,L,a,c))**2)
+    # S = (
+    #         (1 + (QL/(Q+1e-15))**2) / 2 + (1 - (QL/(Q+1e-15))**2)
+    #     )
     return S
