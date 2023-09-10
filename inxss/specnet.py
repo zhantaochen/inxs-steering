@@ -69,15 +69,15 @@ class SpecNeuralRepr(L.LightningModule):
             x[:,i] = self.scale_tensor(x[:,i], *self.scale_dict[key])
         return x.view(shape+(x.shape[-1],))
         
-    
-    def forward(self, x, l=None, Syy=None, Szz=None):
+    def forward(self, x_raw, l=None, Syy=None, Szz=None):
         """
         x: (..., 5)
         the 1st and 2nd are the reciprocal lattice vectors (h,k)
         the 3rd dimension is the energy transfer w
         the 4th and 5th dimensions are the query parameters
         """
-        x = self.prepare_input(x)
+        # avoid inplace change of input x_raw
+        x = self.prepare_input(x_raw.clone())
         shape = x.shape[:-1]
         x = x.view(-1, x.size(-1)).to(self.dtype)
         if l is None:

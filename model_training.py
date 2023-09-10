@@ -5,6 +5,8 @@ from inxss import SirenNet
 
 from sklearn.model_selection import train_test_split
 
+from lightning.pytorch.loggers import TensorBoardLogger
+
 # %%
 from inxss import SpectrumDataset, SpecNeuralRepr
 from torch.utils.data import DataLoader
@@ -40,12 +42,16 @@ checkpoint_callback = ModelCheckpoint(
     save_on_train_epoch_end=False, save_last=True, save_top_k=1, monitor="val_loss"
 )
 
+logger = TensorBoardLogger(save_dir='/pscratch/sd/z/zhantao/inxs_steering')
+
 trainer = L.Trainer(
     max_epochs=10000, accelerator="gpu",
     callbacks=[TQDMProgressBar(refresh_rate=10), checkpoint_callback],
-    log_every_n_steps=1, devices=1,
+    logger=logger, log_every_n_steps=1, devices=1,
     enable_checkpointing=True,
     default_root_dir='/pscratch/sd/z/zhantao/inxs_steering'
 )
 
 trainer.fit(model, train_loader, val_loader)
+
+
