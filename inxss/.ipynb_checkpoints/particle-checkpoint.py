@@ -18,18 +18,18 @@ class Particle(nn.Module):
         self.dim_particles = dim_particles
         self.rng = np.random.default_rng()
         
-        self.prior_configs = prior_configs
-        self.resample_configs = resample_configs
-        self.reset()
-        
-    def reset(self,):
-        if self.prior_configs is None:
+        if prior_configs is not None:
+            self.prior_configs = prior_configs
+        else:
             self.prior_configs = {
                 'types': ['normal'] * self.dim_particles,
                 'args': [{'loc': 0.0, 'scale': 1.0, 'size': (1, self.num_particles)}] * self.dim_particles
             }
         self._parse_prior_configs(self.prior_configs)
-        if self.resample_configs is None:
+
+        if resample_configs is not None:
+            self.resample_configs = resample_configs
+        else:
             self.resample_configs = {
                 'auto_resample': True,
                 'threshold': 0.5,
@@ -108,9 +108,7 @@ class Particle(nn.Module):
             return torch.sqrt(var)
         
     def bayesian_update(self, likelihood):
-        likelihood = likelihood.to(self.weights)
-        with torch.no_grad():
-            self.weights.data[:] = self._normalized_product(self.weights, likelihood)
+        self.weights = self._normalized_product(self.weights, likelihood)
         if self.resample_configs['auto_resample']:
             self._resample_test()
 

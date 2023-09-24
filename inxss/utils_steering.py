@@ -1,13 +1,11 @@
-"""
-Online Variance Calculation using Welford's method
-Author: ChatGPT at OpenAI
-"""
-
 import torch
 
 class OnlineVariance:
     """
     A class to calculate variance in an online manner with device compatibility.
+
+    Online Variance Calculation using Welford's method
+    Author: ChatGPT at OpenAI
     
     Attributes:
         n (int): The number of samples seen so far.
@@ -33,7 +31,7 @@ class OnlineVariance:
         self.M2 = self.M2.to(device)
         self.device = device
 
-    def update(self, x):
+    def update_single(self, x):
         """
         Update variance calculator with a new sample.
         
@@ -46,6 +44,40 @@ class OnlineVariance:
         self.mean += delta / self.n
         delta2 = x - self.mean
         self.M2 += delta * delta2
+        
+    def update(self, x_batch):
+        """
+        Update variance calculator with a batch of samples.
+        
+        Args:
+            x_batch (torch.Tensor): New batch of sample tensors. Should have shape (batch_size, *self.shape)
+        """
+        x_batch = x_batch.to(self.device)  # Ensure x_batch is on the correct device before calculation
+        
+        if x_batch.ndim == len(self.shape):
+            x_batch = x_batch.unsqueeze(0)
+            
+        batch_size = x_batch.size(0)
+        
+        if batch_size == 1:
+            self.update_single(x_batch.squeeze(0))
+        else:
+            # Compute mean and variance for the new batch
+            batch_mean = torch.mean(x_batch, dim=0)
+            batch_var = torch.var(x_batch, dim=0, unbiased=False) * (batch_size / (batch_size - 1))
+            
+            # Update overall count
+            new_count = self.n + batch_size
+            
+            # Compute pooled mean
+            pooled_mean = (self.mean * self.n + batch_mean * batch_size) / new_count
+            
+            # Update M2 using the new batch's variance and difference in means
+            self.M2 += batch_var * (batch_size - 1) + (self.mean - batch_mean) ** 2 * self.n * batch_size / new_count
+            
+            # Update mean and count
+            self.mean = pooled_mean
+            self.n = new_count
 
     def variance(self, sample=True):
         """

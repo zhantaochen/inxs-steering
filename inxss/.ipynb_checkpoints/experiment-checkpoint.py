@@ -6,23 +6,27 @@ from .utils_spectrum import calc_Sqw_from_Syy_Szz
 
 class SimulatedExperiment:
     
-    def __init__(self, w_grid, q_grid, Syy_grid, Szz_grid):
+    def __init__(self, q_grid, w_grid, Syy_grid, Szz_grid, neutron_flux=1e6):
         h_grid = np.sort(np.unique(q_grid[0].numpy()))
         k_grid = np.sort(np.unique(q_grid[1].numpy()))
+        self.neutron_flux = neutron_flux
         self.Syy_func = RegularGridInterpolator(
-            [w_grid.numpy(), h_grid, k_grid],
-            Syy_grid.numpy().reshape((len(w_grid), len(h_grid), len(k_grid)))
+            [h_grid, k_grid, w_grid.numpy()],
+            self.neutron_flux * Syy_grid.reshape((len(w_grid), len(h_grid), len(k_grid))).permute(1,2,0).numpy(),
+            bounds_error=False, fill_value=0, method='linear'
         )
         self.Szz_func = RegularGridInterpolator(
-            [w_grid.numpy(), h_grid, k_grid],
-            Szz_grid.numpy().reshape((len(w_grid), len(h_grid), len(k_grid)))
+            [h_grid, k_grid, w_grid.numpy()],
+            self.neutron_flux * Szz_grid.reshape((len(w_grid), len(h_grid), len(k_grid))).permute(1,2,0).numpy(),
+            bounds_error=False, fill_value=0, method='linear'
         )
-        self.w_grid = w_grid
         self.h_grid = torch.from_numpy(h_grid)
         self.k_grid = torch.from_numpy(k_grid)
+        self.w_grid = w_grid
         
-        self.full_grid = torch.moveaxis(torch.stack(torch.meshgrid(self.w_grid, self.h_grid, self.k_grid, indexing='ij'), dim=0), 0, -1)
         
-    def get_S(self, wQ):
-        S_out = calc_Sqw_from_Syy_Szz(wQ, self.Syy_func, self.Szz_func)
+    def get_measurements_on_coords(self, coords, poisson=True):
+        S_out = calc_Sqw_from_Syy_Szz(coords, self.Syy_func, self.Szz_func)
+        if poisson:
+            S_out = torch.poisson(S_out)
         return S_out

@@ -94,12 +94,12 @@ class PsiMask:
         if self.memmap_mask_path is not None:
             try:
                 self.get_memmap_mask_fname()
-                self.mask_memmap = np.load(os.path.join(self.raw_mask_path, self.filename), mmap_mode='r')
+                self.mask_memmap = np.load(os.path.join(self.memmap_mask_path, self.filename), mmap_mode='r')
             except FileNotFoundError:
                 if build_from_scratch_if_no_memmap:
                     print("mask memmap not found, building from scratch (typically ~10 mins)...")
                     self.build_memmap_mask_from_scratch(self.memmap_mask_path)
-                    self.mask_memmap = np.load(os.path.join(self.raw_mask_path, self.filename), mmap_mode='r')
+                    self.mask_memmap = np.load(os.path.join(self.memmap_mask_path, self.filename), mmap_mode='r')
                 else:
                     print("mask memmap not found, you might want to build from scratch (typically ~10 mins)...")
             
@@ -173,6 +173,8 @@ class PsiMask:
             grid_info = self.grid_info
         filename_parts = []
         for key, values in grid_info.items():
+            if key == 'psi_grid':
+                continue
             prefix = key.split('_')[0]  # Take the first part of the key (like "h" from "h_grid")
             
             # Format values: if it's a float, format to 1 decimal point; else, convert to string
@@ -186,13 +188,32 @@ class PsiMask:
     def build_memmap_mask_from_scratch(self, save_path):
         mask_complete = np.zeros(
             [360,] + [self.grid_info[key][-1] for key in ['h_grid', 'k_grid', 'l_grid', 'w_grid']], dtype=bool)
-        for i in tqdm(self.psi_grid):
+        for i in tqdm(self.psi_grid.int()):
             mask_complete[i] = self.load_mask(i)
         dst_fname = os.path.join(save_path, self.filename)
         np.save(dst_fname, mask_complete)
         print("saved memmap mask to:", dst_fname)
 
-    
+    def load_memmap_mask(self, degree):
+        """
+        Get mask for a given degree from memmap mask.
+        """
+        
+        if isinstance(degree, torch.Tensor):
+            degree = degree.detach().cpu().numpy()
+        
+        lower_degree = int(np.floor(degree)) % 360
+        upper_degree = int(np.ceil(degree)) % 360
+
+        if lower_degree == upper_degree:
+            mask = self.mask_memmap[lower_degree]
+        else:
+            alpha = degree - lower_degree
+            mask = (1 - alpha) * self.mask_memmap[lower_degree] + alpha * self.mask_memmap[upper_degree]
+        
+        mask = torch.from_numpy(mask > 0.5).to(self.device)
+        return mask
+
 #     def __call__(self, coords):
 #         if isinstance(coords, torch.Tensor):
 #             coords = coords.detach().cpu().numpy()
