@@ -151,6 +151,11 @@ class Particle(nn.Module):
         self._normalize_weights()
         indices = self.rng.choice(self.num_particles, size=num_draws, p=self.weights.detach().cpu().numpy(), replace=True)
         return self.positions[:, indices]
+    
+    def random_subset(self, proportion=0.5):
+        self._normalize_weights()
+        indices = self.rng.choice(self.num_particles, size=int(self.num_particles * proportion), p=self.weights.detach().cpu().numpy(), replace=False)
+        return self.positions[:, indices], self.weights[indices]
 
     def _normalized_product(self, p, q):
         o = torch.nan_to_num(p * q)
