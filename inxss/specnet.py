@@ -71,7 +71,7 @@ class SpecNeuralRepr(L.LightningModule):
         
     def forward(self, x_raw, l=None, Syy=None, Szz=None):
         """
-        x: (..., 5)
+        x_raw: (..., 5)
         the 1st and 2nd are the reciprocal lattice vectors (h,k)
         the 3rd dimension is the energy transfer w
         the 4th and 5th dimensions are the query parameters
@@ -174,3 +174,81 @@ class SpecNeuralRepr(L.LightningModule):
             (1 + (ql/(q+1e-15))**2) / 2 * Syy + (1 - (ql/(q+1e-15))**2) * Szz
         )
         return S
+    
+    
+
+class BackgroundNeuralRepr(L.LightningModule):
+    def __init__(
+        self, 
+        scale_dict={
+            'J' : [(20, 40), (0, 0.5)], 
+            'Jp': [(-5,  5), (0, 0.5)], 
+            'w' : [(0, 150), (0, 0.5)]}
+    ):
+        super().__init__()
+        self.save_hyperparameters()
+        # lattice constants
+        self.latt_const = namedtuple('latt_const', ['a', 'c'])(3.89, 12.55)
+        # form factor parameters
+        self.ff = get_ff_params()
+        # networks
+        self.Syy_net = torch.nn.Sequential(
+            SirenNet(
+                dim_in = 4,
+                dim_hidden = 256,
+                dim_out = 256,
+                num_layers = 3,
+                w0_initial = 30.,
+                final_activation = torch.nn.ReLU()
+            ),
+            torch.nn.Linear(256, 256),
+            torch.nn.ReLU(),
+            torch.nn.Linear(256, 1)
+        )
+            
+    def forward(self, x):
+        output = self.net(x)
+        return output
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
+        return optimizer
+
+    def training_step(self, train_batch, batch_idx):
+        """Assuming reciprocal lattice vectors are in the first quadrant of the Brillouin zone
+           Thus no need to project them into the first quadrant
+        """
+        x, (Syy, Szz) = train_batch
+        x = self.prepare_input(x)
+        x = x.view(-1, x.size(-1)).to(self.dtype)
+        Syy = Syy.view(-1, Syy.size(-1)).to(self.dtype)
+        Szz = Szz.view(-1, Szz.size(-1)).to(self.dtype)
+        # Syy = torch.log(1. + Syy.view(-1, Syy.size(-1)).to(self.dtype))
+        # Szz = torch.log(1. + Szz.view(-1, Szz.size(-1)).to(self.dtype))
+        
+        Syy_pred = self.Syy_net(x)
+        Szz_pred = self.Szz_net(x)
+        
+        loss_Syy = F.mse_loss(Syy_pred, Syy)
+        loss_Szz = F.mse_loss(Szz_pred, Szz)
+        loss = loss_Syy + loss_Szz
+        self.log('train_loss', loss)
+        
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        x, (Syy, Szz) = val_batch
+        x = self.prepare_input(x)
+        x = x.view(-1, x.size(-1)).to(self.dtype)
+        Syy = Syy.view(-1, Syy.size(-1)).to(self.dtype)
+        Szz = Szz.view(-1, Szz.size(-1)).to(self.dtype)
+        # Syy = torch.log(1. + Syy.view(-1, Syy.size(-1)).to(self.dtype))
+        # Szz = torch.log(1. + Szz.view(-1, Szz.size(-1)).to(self.dtype))
+        
+        Syy_pred = self.Syy_net(x)
+        Szz_pred = self.Szz_net(x)
+        
+        loss_Syy = F.mse_loss(Syy_pred, Syy)
+        loss_Szz = F.mse_loss(Szz_pred, Szz)
+        loss = loss_Syy + loss_Szz
+        self.log('val_loss', loss)

@@ -37,7 +37,14 @@ class PsiMask:
     """
     Written with help from OpenAI's ChatGPT (GPT-4.0).
     """
-    def __init__(self, raw_mask_path, memmap_mask_path=None, grid_info=None, device='cpu', preload=True, build_from_scratch_if_no_memmap=False):
+    def __init__(self, 
+                 raw_mask_path, 
+                 memmap_mask_path=None, 
+                 grid_info=None, 
+                 device='cpu', 
+                 preload=True, 
+                 build_from_scratch_if_no_memmap=False,
+                 global_mask=None):
         """
         :param raw_mask_path: Folder containing the .pkl mask files
         :param device: Either 'cpu' or 'cuda' to determine where masks are stored
@@ -102,7 +109,11 @@ class PsiMask:
                     self.mask_memmap = np.load(os.path.join(self.memmap_mask_path, self.filename), mmap_mode='r')
                 else:
                     print("mask memmap not found, you might want to build from scratch (typically ~10 mins)...")
-            
+        
+        if global_mask is None:
+            self.global_mask = 1.
+        else:
+            self.global_mask = global_mask.to(self.device) if isinstance(global_mask, torch.Tensor) else torch.from_numpy(global_mask).to(self.device)
         
     def scale_mask(self, mask):
         if not self.need_scale:
@@ -212,7 +223,7 @@ class PsiMask:
             mask = (1 - alpha) * self.mask_memmap[lower_degree] + alpha * self.mask_memmap[upper_degree]
         
         mask = torch.from_numpy(mask > 0.5).to(self.device)
-        return mask
+        return mask * self.global_mask
 
 #     def __call__(self, coords):
 #         if isinstance(coords, torch.Tensor):

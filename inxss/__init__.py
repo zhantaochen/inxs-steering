@@ -6,4 +6,4 @@ from .utils_qpath import linspace_2D_equidistant, plot_points, get_Sqw_func
 from .utils_steering import OnlineVariance
 from .particle import Particle
 from .psimask import PsiMask
-from .experiment import SimulatedExperiment
+from .experiment import SimulatedExperiment, NeutronExperiment

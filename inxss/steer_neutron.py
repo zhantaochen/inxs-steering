@@ -16,31 +16,35 @@ import torch
 #     from tqdm import tqdm
 
 from tqdm import tqdm
-from inxss import SimulatedExperiment, Particle, PsiMask, OnlineVariance
+from inxss import NeutronExperiment, Particle, PsiMask, OnlineVariance
 
 
 
 
-class ExperimentSteerer:
+class NeutronExperimentSteerer:
     def __init__(
         self, 
         model, 
         particle_filter_config,
         mask_config,
         experiment_config,
-        likelihood_mask_threshold=0.05,
+        likelihood_mask_threshold=0.1,
         tqdm_pbar=True,
+        dtype=torch.float32,
         device='cpu'
         ):
+
+        torch.set_default_dtype(dtype)
         
         self.psi_mask = PsiMask(**mask_config)
-        self.particle_filter = Particle(**particle_filter_config)
-        self.experiment = SimulatedExperiment(**experiment_config)
+        self.particle_filter = Particle(**particle_filter_config).to(device).to(dtype)
+        self.experiment = NeutronExperiment(**experiment_config)
         self.variance_tracker = OnlineVariance((np.prod(self.psi_mask.hkw_grid.shape[:-1]),1))
         
         self.particle_filter.grad_off()
         self.experiment.prepare_experiment(self.psi_mask.hklw_grid)
         
+        self.dtype = dtype
         self.device = device
         self.model = model.to(self.device)
         
@@ -82,22 +86,7 @@ class ExperimentSteerer:
         std = self.compute_prediction_std_over_sampled_parameters()
         utility = torch.einsum("ijkl, jkl -> i", self.mask_on_full_psi_grid.to(std), std)        
         return utility
-    
-    # def compute_prediction_std_over_parameters(self,):
-    #     self.variance_tracker.reset()
         
-    #     x_input = self.psi_mask.get_model_input(torch.zeros(2), grid='hkw').view(-1, 5)
-    #     x_input = x_input.unsqueeze(0).repeat(self.particle_filter.num_particles, 1, 1)
-    #     for i_param, param in tqdm(enumerate(self.particle_filter.positions.T), total = self.particle_filter.num_particles):
-    #         x_input[i_param,...,-2:] = param
-            
-    #     x_input_chunks = torch.chunk(x_input, x_input.shape[0] // 5, dim=0)
-    #     with torch.no_grad():
-    #         for _input in self._progress_bar(x_input_chunks, total=len(x_input_chunks)):
-    #             output = self.model(_input.to(self.device)).view((_input.shape[0],) + self.variance_tracker.shape)
-    #             self.variance_tracker.update(output.detach().cpu())
-    #     return self.variance_tracker.std_dev().view(self.psi_mask.hkw_grid.shape[:-1])
-    
     def compute_prediction_std_over_all_parameters(self,):
         
         x_input = self.psi_mask.get_model_input(torch.zeros(2), grid='hkw').view(-1, 5)
@@ -105,7 +94,7 @@ class ExperimentSteerer:
         for i_param, param in enumerate(self.particle_filter.positions.T):
             x_input[i_param,...,-2:] = param
         # x_input shape of [num_params, num_grid, 5]
-        x_input_chunks = torch.chunk(x_input, x_input.shape[0] // 10, dim=0)
+        x_input_chunks = torch.chunk(x_input, x_input.shape[0] // 5, dim=0)
         output_list = []
         with torch.no_grad():
             for _input in self._progress_bar(x_input_chunks, total=len(x_input_chunks), desc="Computing pred std over params"):
@@ -129,7 +118,7 @@ class ExperimentSteerer:
         for i_param, param in enumerate(sampled_particles.T):
             x_input[i_param,...,-2:] = param
         # x_input shape of [num_params, num_grid, 5]
-        x_input_chunks = torch.chunk(x_input, x_input.shape[0] // 10, dim=0)
+        x_input_chunks = torch.chunk(x_input, x_input.shape[0] // 5, dim=0)
         
         output_list = []
         with torch.no_grad():
@@ -152,7 +141,7 @@ class ExperimentSteerer:
     
     def get_good_angle(self,):
         utility = self.compute_utility()
-        p = torch.nn.functional.softmax(utility / (self.experiment.neutron_flux / 10), dim=0).detach().cpu().numpy()
+        p = torch.nn.functional.softmax(utility / (self.experiment.S_scale_factor / 5), dim=0).detach().cpu().numpy()
         idx = np.random.choice(np.arange(utility.shape[0]), 1, p=p)
         return self.psi_mask.psi_grid[idx]
     
@@ -172,8 +161,6 @@ class ExperimentSteerer:
         # return None
         return self.get_good_angle()
         
-
-        
     def compute_likelihood(self, next_measurement, next_mask, likelihood_mask):
         x_input, l_input = self.psi_mask.get_model_input(torch.zeros(2), grid='hklw')
         x_input = x_input[next_mask][likelihood_mask]
@@ -188,19 +175,24 @@ class ExperimentSteerer:
                 
         with torch.no_grad():
             predictions = self.model(x_input.to(self.device), l_input.to(self.device)).detach().cpu()
-        # _loss = (experiment.neutron_flux * predictions - measurement[threshold_mask][None]).norm(dim=-1)
-        pred_measurement = self.experiment.neutron_flux * predictions.clip(0.)
+        # _loss = (experiment.S_scale_factor * predictions - measurement[threshold_mask][None]).norm(dim=-1)
+        pred_measurement = self.experiment.S_scale_factor * predictions.clip(0.)
+        
+        pred_measurement = pred_measurement / pred_measurement.mean() * next_measurement.mean()
+        # pred_measurement = 2128.2198954551045 * pred_measurement
+        
         
         # poisson_negative_log_likelihood = torch.nn.functional.poisson_nll_loss(
         #     pred_measurement, next_measurement[None], 
         #     log_input=False, reduction="none").mean(dim=-1)
         # # TODO: check if this is correct
-        # likelihood = torch.exp(-poisson_negative_log_likelihood / (self.experiment.neutron_flux / 10))
+        # likelihood = torch.exp(-poisson_negative_log_likelihood / (self.experiment.S_scale_factor / 10))
         
         likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / next_measurement[None].sqrt()).pow(2)).mean(dim=-1)
         # print(likelihood.shape)
         return likelihood
     
+    @torch.no_grad()
     def step_steer(self, ):
         
         # next_angle = self.get_good_angle()
@@ -210,7 +202,7 @@ class ExperimentSteerer:
             print("next angle:", next_angle)
         next_mask = self.psi_mask.load_memmap_mask(next_angle)
         
-        next_measurement = self.experiment.get_measurements_by_mask(next_mask, poisson=False)
+        next_measurement = self.experiment.get_measurements_by_mask(next_mask)
         likelihood_mask = next_measurement > next_measurement.max() * self.likelihood_mask_threshold
         next_measurement = next_measurement[likelihood_mask]
         

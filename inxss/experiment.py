@@ -60,18 +60,18 @@ class NeutronExperiment:
         self.S_scale_factor = S_scale_factor
 
         self.S_func = RegularGridInterpolator(
-            [convert_to_numpy(_) for _ in [q_grid[0], q_grid[1], w_grid]],
-            self.S_scale_factor * convert_to_numpy(S_grid).sum(axis=-2),
+            [convert_to_numpy(_) for _ in [q_grid[0], q_grid[1], q_grid[2], w_grid]],
+            self.S_scale_factor * convert_to_numpy(S_grid),
             bounds_error=False, fill_value=0, method='linear'
         )
     
     def prepare_experiment(self, coords):
-        self.Sqw = self.get_measurements_on_coords(coords)
+        self.Sqw = torch.from_numpy(self.get_measurements_on_coords(coords))
     
     def get_measurements_by_mask(self, mask):
         S_out = self.Sqw[mask]
         return S_out
-
+    
     def get_measurements_on_coords(self, coords):
         S_out = self.S_func(coords)
         return S_out

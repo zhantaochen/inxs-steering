@@ -41,7 +41,7 @@ def linspace_2D(points, N_sep):
 
 
 # Function created by OpenAI's GPT-4 model
-def linspace_2D_equidistant(points, N):
+def linspace_2D_equidistant(points, N, return_indices=False):
     points = np.asarray(points, dtype=float)  # Ensure points are float type
     N_pt = len(points)
 
@@ -63,17 +63,21 @@ def linspace_2D_equidistant(points, N):
 
     # Generate points for each segment
     idx = 0
+    critical_point_indices = [0]  # Start with the first critical point
     for i in range(N_pt - 1):
         x_vals = np.linspace(points[i, 0], points[i + 1, 0], N_segment[i]+1)[:-1]
         y_vals = np.linspace(points[i, 1], points[i + 1, 1], N_segment[i]+1)[:-1]
 
         result[idx:idx+N_segment[i], :] = np.stack((x_vals, y_vals), axis=-1)
         idx += N_segment[i]
+        critical_point_indices.append(idx)
 
     # Include the last point of the last segment
     result[-1] = points[-1]
-
-    return result
+    if return_indices:
+        return result, critical_point_indices
+    else:
+        return result
 
 
 def plot_points(points, ax=None):
