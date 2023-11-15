@@ -7,6 +7,7 @@ import lightning as L
 
 from .siren import SirenNet
 from .formfact import get_ff_params
+from .utils_grid import scale_tensor
 
 class SpecNeuralRepr(L.LightningModule):
     def __init__(
@@ -50,12 +51,7 @@ class SpecNeuralRepr(L.LightningModule):
             torch.nn.Linear(256, 1)
         )
         self.scale_dict = scale_dict
-    
-    def scale_tensor(self, tensor, bounds_init, bounds_fnal=(-1., 1.)):
-        min_init, max_init = bounds_init
-        min_fnal, max_fnal = bounds_fnal
-        return ((tensor - min_init) * (max_fnal - min_fnal) / (max_init - min_init)) + min_fnal
-    
+ 
     def prepare_input(self, x):
         shape = x.shape[:-1]
         x = x.view(-1, x.size(-1)).to(self.dtype)
@@ -66,7 +62,7 @@ class SpecNeuralRepr(L.LightningModule):
                 i = 3
             elif key == 'Jp':
                 i = 4
-            x[:,i] = self.scale_tensor(x[:,i], *self.scale_dict[key])
+            x[:,i] = scale_tensor(x[:,i], *self.scale_dict[key])
         return x.view(shape+(x.shape[-1],))
         
     def forward(self, x_raw, l=None, Syy=None, Szz=None):
@@ -177,14 +173,14 @@ class SpecNeuralRepr(L.LightningModule):
     
     
 
-class BackgroundNeuralRepr(L.LightningModule):
+class FullSpectrumNetwork(L.LightningModule):
     def __init__(
         self, 
         scale_dict={
-            'J' : [(20, 40), (0, 0.5)], 
-            'Jp': [(-5,  5), (0, 0.5)], 
-            'w' : [(0, 150), (0, 0.5)]}
-    ):
+            'h' : [(0, 1), (0, 10)],
+            'k' : [(0, 1), (0, 10)],
+            'w' : [(0, 150), (0, 15)]}
+        ):
         super().__init__()
         self.save_hyperparameters()
         # lattice constants
@@ -192,9 +188,9 @@ class BackgroundNeuralRepr(L.LightningModule):
         # form factor parameters
         self.ff = get_ff_params()
         # networks
-        self.Syy_net = torch.nn.Sequential(
+        self.net = torch.nn.Sequential(
             SirenNet(
-                dim_in = 4,
+                dim_in = 6,
                 dim_hidden = 256,
                 dim_out = 256,
                 num_layers = 3,
@@ -203,10 +199,27 @@ class BackgroundNeuralRepr(L.LightningModule):
             ),
             torch.nn.Linear(256, 256),
             torch.nn.ReLU(),
-            torch.nn.Linear(256, 1)
+            torch.nn.Linear(256, 1),
+            torch.nn.ReLU()
         )
+        self.scale_dict = scale_dict
+        self.scale_indices = {
+            'h' : 0, 'k' : 1, 'l' : 2, 'w' : 3, 'J' : 4, 'Jp' : 5
+        }
+        
+        self.loss_fn = torch.nn.MSELoss()
+    
+
+    def prepare_input(self, x):
+        shape = x.shape[:-1]
+        x = x.view(-1, x.size(-1)).to(self.dtype)
+        for key in self.scale_dict.keys():
+            i = self.scale_indices[key]
+            x[:,i] = scale_tensor(x[:,i], *self.scale_dict[key])
+        return x.view(shape+(x.shape[-1],))
             
-    def forward(self, x):
+    def forward(self, x_raw):
+        x = self.prepare_input(x_raw.clone())
         output = self.net(x)
         return output
 
@@ -214,41 +227,20 @@ class BackgroundNeuralRepr(L.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
         return optimizer
 
-    def training_step(self, train_batch, batch_idx):
-        """Assuming reciprocal lattice vectors are in the first quadrant of the Brillouin zone
-           Thus no need to project them into the first quadrant
-        """
-        x, (Syy, Szz) = train_batch
-        x = self.prepare_input(x)
-        x = x.view(-1, x.size(-1)).to(self.dtype)
-        Syy = Syy.view(-1, Syy.size(-1)).to(self.dtype)
-        Szz = Szz.view(-1, Szz.size(-1)).to(self.dtype)
-        # Syy = torch.log(1. + Syy.view(-1, Syy.size(-1)).to(self.dtype))
-        # Szz = torch.log(1. + Szz.view(-1, Szz.size(-1)).to(self.dtype))
+    def training_step(self, batch, batch_idx):
+        x, S = batch
         
-        Syy_pred = self.Syy_net(x)
-        Szz_pred = self.Szz_net(x)
+        S_pred = self.forward(x)
+        loss = self.loss_fn(S_pred, S)
         
-        loss_Syy = F.mse_loss(Syy_pred, Syy)
-        loss_Szz = F.mse_loss(Szz_pred, Szz)
-        loss = loss_Syy + loss_Szz
-        self.log('train_loss', loss)
+        self.log('train_loss', loss.item())
         
         return loss
 
-    def validation_step(self, val_batch, batch_idx):
-        x, (Syy, Szz) = val_batch
-        x = self.prepare_input(x)
-        x = x.view(-1, x.size(-1)).to(self.dtype)
-        Syy = Syy.view(-1, Syy.size(-1)).to(self.dtype)
-        Szz = Szz.view(-1, Szz.size(-1)).to(self.dtype)
-        # Syy = torch.log(1. + Syy.view(-1, Syy.size(-1)).to(self.dtype))
-        # Szz = torch.log(1. + Szz.view(-1, Szz.size(-1)).to(self.dtype))
+    def validation_step(self, batch, batch_idx):
+        x, S = batch
         
-        Syy_pred = self.Syy_net(x)
-        Szz_pred = self.Szz_net(x)
+        S_pred = self.forward(x)
+        loss = self.loss_fn(S_pred, S)
         
-        loss_Syy = F.mse_loss(Syy_pred, Syy)
-        loss_Szz = F.mse_loss(Szz_pred, Szz)
-        loss = loss_Syy + loss_Szz
-        self.log('val_loss', loss)
+        self.log('val_loss', loss.item())

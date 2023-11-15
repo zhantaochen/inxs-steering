@@ -2,19 +2,14 @@ import numpy as np
 
 import torch
 from torch.utils.data import Dataset, DataLoader
+from .utils_grid import convert_to_numpy, convert_to_torch, scale_tensor
+import glob, os
 
 class SpectrumDataset(Dataset):
     def __init__(self, data_path, num_wq=100):
         self.data_dict = torch.load(data_path)
-        # self.data_dict['Syy'] = self.data_dict['Syy'] / (
-        #     self.data_dict['Syy'].amax(dim=(1,2), keepdims=True) + 1e-15)
-        # self.data_dict['Szz'] = self.data_dict['Szz'] / (
-        #     self.data_dict['Szz'].amax(dim=(1,2), keepdims=True) + 1e-15)
         self.num_wq = num_wq
-        self.data_dict['params'][:,0] = self.scale_tensor(self.data_dict['params'][:,0], (20, 40), (0.0, 0.5))
-        self.data_dict['params'][:,1] = self.scale_tensor(self.data_dict['params'][:,1], (-5, 5), (0.0, 0.5))
-        self.data_dict['w_grid'] = self.scale_tensor(self.data_dict['w_grid'], (0, 150), (0.0, 0.5))
-        
+
     def __len__(self):
         return self.data_dict['Syy'].size(0)
     
@@ -26,43 +21,52 @@ class SpectrumDataset(Dataset):
         
         w = self.data_dict['w_grid'][None,nw_indices]
         q = self.data_dict['q_grid'][:2,nq_indices]
-        p = self.data_dict['params'][index,None].T.repeat(1, self.num_wq)
+        p = self.data_dict['params'][index, None].T.repeat(1, self.num_wq)
         x = torch.transpose(torch.cat((q, w, p), dim=0), 1, 0)
         # Index into the tensor to get the random nw by nq sample
         Syy = self.data_dict['Syy'][index, nw_indices, nq_indices, None]
         Szz = self.data_dict['Szz'][index, nw_indices, nq_indices, None]
         
         return x, (Syy, Szz)
-    
-    def scale_tensor(self, tensor, bounds_init, bounds_fnal=(-1., 1.)):
-        min_init, max_init = bounds_init
-        min_fnal, max_fnal = bounds_fnal
-        return ((tensor - min_init) * (max_fnal - min_fnal) / (max_init - min_init)) + min_fnal
 
+
+class BackgroundDataset(Dataset):
+    def __init__(self, data_dict):
+        self.data_dict = data_dict
+        self.data_dict['S'] = convert_to_torch(self.data_dict['S'].reshape(-1, 1))
+        self.data_dict['x'] = convert_to_torch(self.data_dict['x'].reshape(-1, 4))
+        
+    def __len__(self):
+        return self.data_dict['S'].size(0)
+    
+    def __getitem__(self, idx):
+        return self.data_dict['x'][idx], self.data_dict['S'][idx]
         
     
-# class SpectrumDataset(Dataset):
-#     def __init__(self, data_path, num_wq=100):
-#         self.data_dict = torch.load(data_path)
-#         self.num_wq = num_wq
-        
-#         mean_intens = self.data_dict['Syy'].mean(dim=0) + self.data_dict['Szz'].mean(dim=0)
-#         self.pr = (mean_intens.exp() / (mean_intens.exp().sum() + 1e-15)).reshape(-1)
-#         self.wq_grid = torch.cat([
-#             self.data_dict['w_grid'].view(self.data_dict['w_grid'].shape[0], -1).unsqueeze(1).expand(-1, self.data_dict['q_grid'].shape[1], -1), 
-#             self.data_dict['q_grid'][:2,:].T.unsqueeze(0).expand(self.data_dict['w_grid'].shape[0], -1, -1)], dim=2).reshape(-1,3)
+class FullSpectrumDataset(Dataset):
     
-#     def __len__(self):
-#         return self.data_dict['Syy'].size(0)
+    def __init__(self, S_data_file, param_data_file, grid_file, num_coords_per_sample=100):
+        self.S_shape = torch.load(os.path.join(os.path.dirname(S_data_file), 'S_shape.pt'))['S_shape']
+        self.S_memmap_array = np.memmap(S_data_file, dtype=np.float32, mode='r', shape=self.S_shape)
+        
+        self.param = torch.load(param_data_file)
+        
+        self.grid_metadata = torch.load(grid_file)
+        self.num_coords_per_sample = num_coords_per_sample
+        
+        for key, val in self.grid_metadata.items():
+            setattr(self, f'{key}', np.linspace(*val))
+
+        self.hklw_grid = torch.from_numpy(
+            np.moveaxis(np.stack(np.meshgrid(self.h_grid, self.k_grid, self.l_grid, self.w_grid, indexing='ij'), axis=0), 0, -1))
     
-#     def __getitem__(self, index):
-        
-#         wq_index = np.random.choice(self.pr.numel(), self.num_wq, p=self.pr)
-        
-#         x = torch.zeros((self.num_wq, 5))
-#         x[:,:3] = self.wq_grid[wq_index]
-#         x[:,-2:] = self.data_dict['params'][index]
-#         Syy = self.data_dict['Syy'][0].reshape(-1)[wq_index, None]
-#         Szz = self.data_dict['Szz'][0].reshape(-1)[wq_index, None]
-        
-#         return x, (Syy, Szz)
+    def __len__(self,):
+        return self.S_shape[0]
+    
+    def __getitem__(self, index):
+        S_data = torch.from_numpy(self.S_memmap_array[index].copy())
+        param_data = self.param[index]
+        random_indices = np.random.choice(self.hklw_grid.numel() // 4, self.num_coords_per_sample)
+        x = torch.cat([self.hklw_grid.view(-1,4)[random_indices], param_data.reshape(-1,2).repeat(self.num_coords_per_sample, 1)], dim=1)
+        y = S_data.view(-1)[random_indices].view(-1,1)
+        return x, y

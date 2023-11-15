@@ -20,3 +20,7 @@ def construct_grid(arrays):
         arrays = [torch.from_numpy(a) for a in arrays]
     return torch.moveaxis(torch.stack(torch.meshgrid(*arrays, indexing='ij'), dim=0), 0, -1)
 
+def scale_tensor(tensor, bounds_init, bounds_fnal=(-1., 1.)):
+    min_init, max_init = bounds_init
+    min_fnal, max_fnal = bounds_fnal
+    return ((tensor - min_init) * (max_fnal - min_fnal) / (max_init - min_init)) + min_fnal

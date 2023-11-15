@@ -17,9 +17,7 @@ import torch
 
 from tqdm import tqdm
 from inxss import NeutronExperiment, Particle, PsiMask, OnlineVariance
-
-
-
+from inxss.experiment import Background
 
 class NeutronExperimentSteerer:
     def __init__(
@@ -28,6 +26,7 @@ class NeutronExperimentSteerer:
         particle_filter_config,
         mask_config,
         experiment_config,
+        background_config=None,
         likelihood_mask_threshold=0.1,
         tqdm_pbar=True,
         dtype=torch.float32,
@@ -43,6 +42,10 @@ class NeutronExperimentSteerer:
         
         self.particle_filter.grad_off()
         self.experiment.prepare_experiment(self.psi_mask.hklw_grid)
+        
+        self.background = Background(**background_config) if background_config is not None else None
+        if self.background is not None:
+            self.background.prepare_experiment(self.psi_mask.hklw_grid)
         
         self.dtype = dtype
         self.device = device
@@ -165,6 +168,8 @@ class NeutronExperimentSteerer:
         x_input, l_input = self.psi_mask.get_model_input(torch.zeros(2), grid='hklw')
         x_input = x_input[next_mask][likelihood_mask]
         l_input = l_input[next_mask][likelihood_mask]
+        
+        exist_signal_in_exp = (self.experiment.Sqw > 1e-10)[next_mask][likelihood_mask].unsqueeze(0).repeat(self.particle_filter.num_particles, 1)
 
         x_input = x_input.unsqueeze(0).repeat(self.particle_filter.num_particles, 1, 1)
         l_input = l_input.unsqueeze(0).repeat(self.particle_filter.num_particles, 1, 1)
@@ -175,11 +180,26 @@ class NeutronExperimentSteerer:
                 
         with torch.no_grad():
             predictions = self.model(x_input.to(self.device), l_input.to(self.device)).detach().cpu()
-        # _loss = (experiment.S_scale_factor * predictions - measurement[threshold_mask][None]).norm(dim=-1)
-        pred_measurement = self.experiment.S_scale_factor * predictions.clip(0.)
+            predictions = exist_signal_in_exp * predictions
+        # pred_measurement = self.experiment.S_scale_factor * predictions.clip(0.)
         
-        pred_measurement = pred_measurement / pred_measurement.mean() * next_measurement.mean()
-        # pred_measurement = 2128.2198954551045 * pred_measurement
+        if self.background is not None:
+            # bkg = self.background.get_background_by_mask(next_mask)[likelihood_mask]
+            _mask_inner =  x_input[...,:2].norm(dim=-1)  <= self.background.scale_separator['inner_mid']
+            _mask_mid   = (x_input[...,:2].norm(dim=-1)  >  self.background.scale_separator['inner_mid']) * (x_input[...,:2].norm(dim=-1) <= self.background.scale_separator['mid_outer'])
+            _mask_outer =  x_input[...,:2].norm(dim=-1)  >  self.background.scale_separator['mid_outer']
+            
+            _mask_inner = _mask_inner * exist_signal_in_exp
+            _mask_mid   = _mask_mid   * exist_signal_in_exp
+            _mask_outer = _mask_outer * exist_signal_in_exp
+            
+            pred_measurement = self.background.get_background_by_mask(next_mask)[likelihood_mask].clone().unsqueeze(0).repeat(self.particle_filter.num_particles, 1)
+            # print(x_input.shape, _mask_inner.shape, predictions.shape, pred_measurement.shape)
+            pred_measurement[_mask_inner] += predictions[_mask_inner] * self.background.scale['inner']['scale_factor']
+            pred_measurement[_mask_mid]   += predictions[_mask_mid]   * self.background.scale['mid']['scale_factor']
+            pred_measurement[_mask_outer] += predictions[_mask_outer] * self.background.scale['outer']['scale_factor']
+        else:
+            pred_measurement = pred_measurement / pred_measurement.mean() * next_measurement.mean()
         
         
         # poisson_negative_log_likelihood = torch.nn.functional.poisson_nll_loss(
@@ -188,8 +208,12 @@ class NeutronExperimentSteerer:
         # # TODO: check if this is correct
         # likelihood = torch.exp(-poisson_negative_log_likelihood / (self.experiment.S_scale_factor / 10))
         
+        pred_measurement = torch.log(1 + pred_measurement)
+        next_measurement = torch.log(1 + next_measurement)
+        
         likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / next_measurement[None].sqrt()).pow(2)).mean(dim=-1)
         # print(likelihood.shape)
+        torch.nan_to_num(likelihood, nan=0., posinf=0., neginf=0., out=likelihood)
         return likelihood
     
     @torch.no_grad()
@@ -203,7 +227,11 @@ class NeutronExperimentSteerer:
         next_mask = self.psi_mask.load_memmap_mask(next_angle)
         
         next_measurement = self.experiment.get_measurements_by_mask(next_mask)
-        likelihood_mask = next_measurement > next_measurement.max() * self.likelihood_mask_threshold
+        # likelihood_mask = next_measurement > next_measurement.max() * self.likelihood_mask_threshold
+        
+        likelihood_mask = torch.zeros_like(next_measurement, dtype=torch.bool)
+        likelihood_mask[np.random.choice(np.arange(likelihood_mask.shape[0]), min(150, int(likelihood_mask.shape[0] * self.likelihood_mask_threshold)), replace=False)] = True
+        
         next_measurement = next_measurement[likelihood_mask]
         
         likelihood = self.compute_likelihood(next_measurement, next_mask, likelihood_mask)

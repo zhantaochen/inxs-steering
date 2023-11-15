@@ -75,3 +75,36 @@ class NeutronExperiment:
     def get_measurements_on_coords(self, coords):
         S_out = self.S_func(coords)
         return S_out
+    
+class Background:
+    
+    def __init__(self, q_grid, w_grid, bkg_grid, scale, scale_separator):
+        """
+        q_grid: tuple of (h_grid, k_grid, l_grid), each of shape (num_qi) for i = h,k,l
+        w_grid: array of shape (num_w,)
+        bkg_grid: array of shape (num_h, num_k, num_l, num_w)
+        """
+        self.h_grid = convert_to_torch(q_grid[0])
+        self.k_grid = convert_to_torch(q_grid[1])
+        self.l_grid = convert_to_torch(q_grid[2])
+        self.w_grid = convert_to_torch(w_grid)
+        self.scale = scale
+        self.scale_separator = scale_separator
+
+        self.bkg_func = RegularGridInterpolator(
+            [convert_to_numpy(_) for _ in [q_grid[0], q_grid[1], q_grid[2], w_grid]],
+            convert_to_numpy(bkg_grid),
+            bounds_error=False, fill_value=0, method='linear'
+        )
+    
+    def prepare_experiment(self, coords):
+        self.bkg_qw = torch.from_numpy(self.get_background_on_coords(coords))
+    
+    def get_background_by_mask(self, mask):
+        S_out = self.bkg_qw[mask]
+        return S_out
+    
+    def get_background_on_coords(self, coords):
+        S_out = self.bkg_func(coords)
+        return S_out
+    
