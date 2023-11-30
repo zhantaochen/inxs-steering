@@ -19,8 +19,6 @@ from tqdm import tqdm
 from inxss import SimulatedExperiment, Particle, PsiMask, OnlineVariance
 
 
-
-
 class SimulatedExperimentSteerer:
     def __init__(
         self, 

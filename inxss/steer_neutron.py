@@ -1,19 +1,6 @@
 import numpy as np
 import torch
 
-# def is_notebook():
-#     try:
-#         from IPython import get_ipython
-#         if "IPKernelApp" not in get_ipython().config:  # pragma: no cover
-#             return False
-#     except ImportError:
-#         return False
-#     return True
-
-# if is_notebook():
-#     from tqdm.notebook import tqdm
-# else:
-#     from tqdm import tqdm
 
 from tqdm import tqdm
 from inxss import NeutronExperiment, Particle, PsiMask, OnlineVariance
@@ -27,7 +14,7 @@ class NeutronExperimentSteerer:
         mask_config,
         experiment_config,
         background_config=None,
-        likelihood_mask_threshold=0.1,
+        likelihood_sample_ratio=0.1,
         tqdm_pbar=True,
         dtype=torch.float32,
         device='cpu'
@@ -38,7 +25,6 @@ class NeutronExperimentSteerer:
         self.psi_mask = PsiMask(**mask_config)
         self.particle_filter = Particle(**particle_filter_config).to(device).to(dtype)
         self.experiment = NeutronExperiment(**experiment_config)
-        self.variance_tracker = OnlineVariance((np.prod(self.psi_mask.hkw_grid.shape[:-1]),1))
         
         self.particle_filter.grad_off()
         self.experiment.prepare_experiment(self.psi_mask.hklw_grid)
@@ -52,7 +38,7 @@ class NeutronExperimentSteerer:
         self.model = model.to(self.device)
         
         self.tqdm_pbar = tqdm_pbar
-        self.likelihood_mask_threshold = likelihood_mask_threshold
+        self.likelihood_sample_ratio = likelihood_sample_ratio
         
         self.get_mask_on_full_psi_grid()
         
@@ -66,16 +52,7 @@ class NeutronExperimentSteerer:
         if self.tqdm_pbar:
             return tqdm(iterable, **kwargs)
         return iterable
-    
-    # def compute_utility(self,):
-    #     std = self.compute_prediction_std_over_parameters()
-    #     utility = []
-    #     for _angle in self._progress_bar(self.psi_mask.psi_grid):
-    #         _mask = self.psi_mask.load_memmap_mask(_angle)
-    #         utility.append((_mask.sum(dim=2) * std).mean())
-    #     utility = torch.stack(utility)
-    #     return utility
-    
+        
     def get_mask_on_full_psi_grid(self,):
         mask = []
         for _angle in self._progress_bar(self.psi_mask.psi_grid, desc="Computing mask on full psi grid"):
@@ -104,7 +81,6 @@ class NeutronExperimentSteerer:
                 _output = torch.zeros(_input.shape[:-1]).to(_input)
                 _output[:,self.attainable_mask_on_full_psi_grid] = self.model(_input[:,self.attainable_mask_on_full_psi_grid].to(self.device)).detach().cpu()
                 output_list.append(_output)
-                # output_list.append(self.model(_input.to(self.device)).detach().cpu())
         output_list = torch.cat(output_list, dim=0)
         weighted_mean = torch.sum((output_list * self.particle_filter.weights[:,None]) / self.particle_filter.weights.sum(), dim=0)
         weighted_std = torch.sum(((output_list - weighted_mean[None,:]).pow(2) * self.particle_filter.weights[:,None]) / self.particle_filter.weights.sum(), dim=0).sqrt()
@@ -117,7 +93,6 @@ class NeutronExperimentSteerer:
         
         x_input = self.psi_mask.get_model_input(torch.zeros(2), grid='hkw').view(-1, 5)
         x_input = x_input.unsqueeze(0).repeat(sampled_particles.shape[1], 1, 1)
-        # print(x_input.shape)
         for i_param, param in enumerate(sampled_particles.T):
             x_input[i_param,...,-2:] = param
         # x_input shape of [num_params, num_grid, 5]
@@ -129,7 +104,6 @@ class NeutronExperimentSteerer:
                 _output = torch.zeros(_input.shape[:-1]).to(_input)
                 _output[:,self.attainable_mask_on_full_psi_grid] = self.model(_input[:,self.attainable_mask_on_full_psi_grid].to(self.device)).detach().cpu()
                 output_list.append(_output)
-                # output_list.append(self.model(_input.to(self.device)).detach().cpu())
         output_list = torch.cat(output_list, dim=0)
         weighted_mean = torch.sum((output_list * sampled_particle_weights[:,None]) / sampled_particle_weights.sum(), dim=0)
         weighted_std = torch.sum(((output_list - weighted_mean[None,:]).pow(2) * sampled_particle_weights[:,None]) / sampled_particle_weights.sum(), dim=0).sqrt()
@@ -163,6 +137,11 @@ class NeutronExperimentSteerer:
         # If all angles have been measured, return None or handle this case appropriately
         # return None
         return self.get_good_angle()
+    
+    def solve_background_signal_factors(self, measurement, background, signal):
+        A = torch.cat([background.squeeze()[:,None], signal.squeeze()[:,None]], dim=-1)
+        x = torch.einsum('ij, kj, k -> i', torch.linalg.inv(torch.einsum('ji, jk -> ik', A, A)), A, measurement)
+        return x.clamp(0.0)
         
     def compute_likelihood(self, next_measurement, next_mask, likelihood_mask):
         x_input, l_input = self.psi_mask.get_model_input(torch.zeros(2), grid='hklw')
@@ -181,38 +160,35 @@ class NeutronExperimentSteerer:
         with torch.no_grad():
             predictions = self.model(x_input.to(self.device), l_input.to(self.device)).detach().cpu()
             predictions = exist_signal_in_exp * predictions
-        # pred_measurement = self.experiment.S_scale_factor * predictions.clip(0.)
+        # pred_measurement = self.experiment.S_scale_afctor * predictions.clip(0.)
         
         if self.background is not None:
-            # bkg = self.background.get_background_by_mask(next_mask)[likelihood_mask]
-            _mask_inner =  x_input[...,:2].norm(dim=-1)  <= self.background.scale_separator['inner_mid']
-            _mask_mid   = (x_input[...,:2].norm(dim=-1)  >  self.background.scale_separator['inner_mid']) * (x_input[...,:2].norm(dim=-1) <= self.background.scale_separator['mid_outer'])
-            _mask_outer =  x_input[...,:2].norm(dim=-1)  >  self.background.scale_separator['mid_outer']
+            _background = self.background.get_background_by_mask(next_mask)[likelihood_mask].clone()
+            factors = self.solve_background_signal_factors(next_measurement, _background, predictions.mean(dim=0))
             
-            _mask_inner = _mask_inner * exist_signal_in_exp
-            _mask_mid   = _mask_mid   * exist_signal_in_exp
-            _mask_outer = _mask_outer * exist_signal_in_exp
+            pred_measurement = _background * factors[0] + predictions * factors[1]
             
-            pred_measurement = self.background.get_background_by_mask(next_mask)[likelihood_mask].clone().unsqueeze(0).repeat(self.particle_filter.num_particles, 1)
-            # print(x_input.shape, _mask_inner.shape, predictions.shape, pred_measurement.shape)
-            pred_measurement[_mask_inner] += predictions[_mask_inner] * self.background.scale['inner']['scale_factor']
-            pred_measurement[_mask_mid]   += predictions[_mask_mid]   * self.background.scale['mid']['scale_factor']
-            pred_measurement[_mask_outer] += predictions[_mask_outer] * self.background.scale['outer']['scale_factor']
+            # _mask_inner =  x_input[...,:2].norm(dim=-1)  <= self.background.scale_separator['inner_mid']
+            # _mask_mid   = (x_input[...,:2].norm(dim=-1)  >  self.background.scale_separator['inner_mid']) * (x_input[...,:2].norm(dim=-1) <= self.background.scale_separator['mid_outer'])
+            # _mask_outer =  x_input[...,:2].norm(dim=-1)  >  self.background.scale_separator['mid_outer']
+            
+            # _mask_inner = _mask_inner * exist_signal_in_exp
+            # _mask_mid   = _mask_mid   * exist_signal_in_exp
+            # _mask_outer = _mask_outer * exist_signal_in_exp
+            
+            # pred_measurement = self.background.get_background_by_mask(next_mask)[likelihood_mask].clone().unsqueeze(0).repeat(self.particle_filter.num_particles, 1)
+            
+            # pred_measurement[_mask_inner] += predictions[_mask_inner] * self.background.scale['inner']['scale_factor']
+            # pred_measurement[_mask_mid]   += predictions[_mask_mid]   * self.background.scale['mid']['scale_factor']
+            # pred_measurement[_mask_outer] += predictions[_mask_outer] * self.background.scale['outer']['scale_factor']
         else:
             pred_measurement = pred_measurement / pred_measurement.mean() * next_measurement.mean()
-        
-        
-        # poisson_negative_log_likelihood = torch.nn.functional.poisson_nll_loss(
-        #     pred_measurement, next_measurement[None], 
-        #     log_input=False, reduction="none").mean(dim=-1)
-        # # TODO: check if this is correct
-        # likelihood = torch.exp(-poisson_negative_log_likelihood / (self.experiment.S_scale_factor / 10))
         
         pred_measurement = torch.log(1 + pred_measurement)
         next_measurement = torch.log(1 + next_measurement)
         
         likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / next_measurement[None].sqrt()).pow(2)).mean(dim=-1)
-        # print(likelihood.shape)
+        # likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / next_measurement[None]).pow(2)).mean(dim=-1)
         torch.nan_to_num(likelihood, nan=0., posinf=0., neginf=0., out=likelihood)
         return likelihood
     
@@ -227,10 +203,10 @@ class NeutronExperimentSteerer:
         next_mask = self.psi_mask.load_memmap_mask(next_angle)
         
         next_measurement = self.experiment.get_measurements_by_mask(next_mask)
-        # likelihood_mask = next_measurement > next_measurement.max() * self.likelihood_mask_threshold
+        # likelihood_mask = next_measurement > next_measurement.max() * self.likelihood_sample_ratio
         
         likelihood_mask = torch.zeros_like(next_measurement, dtype=torch.bool)
-        likelihood_mask[np.random.choice(np.arange(likelihood_mask.shape[0]), min(150, int(likelihood_mask.shape[0] * self.likelihood_mask_threshold)), replace=False)] = True
+        likelihood_mask[np.random.choice(np.arange(likelihood_mask.shape[0]), min(150, int(likelihood_mask.shape[0] * self.likelihood_sample_ratio)), replace=False)] = True
         
         next_measurement = next_measurement[likelihood_mask]
         

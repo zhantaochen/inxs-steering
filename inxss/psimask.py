@@ -224,12 +224,3 @@ class PsiMask:
         
         mask = torch.from_numpy(mask > 0.5).to(self.device)
         return mask * self.global_mask
-
-#     def __call__(self, coords):
-#         if isinstance(coords, torch.Tensor):
-#             coords = coords.detach().cpu().numpy()
-#         elif isinstance(coords, list):
-#             coords = np.array(list)
-          
-#         coords[...,0] = coords[...,0] % 360
-#         return self.psi_mask_func(coords)
