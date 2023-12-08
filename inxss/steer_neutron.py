@@ -43,10 +43,12 @@ class NeutronExperimentSteerer:
         self.get_mask_on_full_psi_grid()
         
         self.measured_angles = []
+        self.sig_bkg_factors = []
     
     def reset(self):
         self.particle_filter.reset()
         self.measured_angles = []
+        self.sig_bkg_factors = []
     
     def _progress_bar(self, iterable, **kwargs):
         if self.tqdm_pbar:
@@ -165,6 +167,7 @@ class NeutronExperimentSteerer:
         if self.background is not None:
             _background = self.background.get_background_by_mask(next_mask)[likelihood_mask].clone()
             factors = self.solve_background_signal_factors(next_measurement, _background, predictions.mean(dim=0))
+            self.sig_bkg_factors.append(factors)
             
             pred_measurement = _background * factors[0] + predictions * factors[1]
             

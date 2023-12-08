@@ -12,17 +12,22 @@ class SimulatedExperiment:
         q_grid of shape (3, num_q_grid)
         w_grid of shape (num_w_grid)
         """
-        h_grid_src = np.sort(np.unique(q_grid[0].numpy()))
-        k_grid_src = np.sort(np.unique(q_grid[1].numpy()))
+        q_grid = convert_to_numpy(q_grid)
+        w_grid = convert_to_numpy(w_grid)
+        Syy_grid = convert_to_numpy(Syy_grid)
+        Szz_grid = convert_to_numpy(Szz_grid)
+        
+        h_grid_src = np.sort(np.unique(q_grid[0]))
+        k_grid_src = np.sort(np.unique(q_grid[1]))
         self.neutron_flux = neutron_flux
         self.Syy_func = RegularGridInterpolator(
-            [h_grid_src, k_grid_src, w_grid.numpy()],
-            self.neutron_flux * Syy_grid.reshape((len(w_grid), len(h_grid_src), len(k_grid_src))).permute(1,2,0).numpy(),
+            [h_grid_src, k_grid_src, w_grid],
+            self.neutron_flux * np.transpose(Syy_grid.reshape((len(w_grid), len(h_grid_src), len(k_grid_src))), (1,2,0)),
             bounds_error=False, fill_value=0, method='linear'
         )
         self.Szz_func = RegularGridInterpolator(
-            [h_grid_src, k_grid_src, w_grid.numpy()],
-            self.neutron_flux * Szz_grid.reshape((len(w_grid), len(h_grid_src), len(k_grid_src))).permute(1,2,0).numpy(),
+            [h_grid_src, k_grid_src, w_grid],
+            self.neutron_flux * np.transpose(Szz_grid.reshape((len(w_grid), len(h_grid_src), len(k_grid_src))), (1,2,0)),
             bounds_error=False, fill_value=0, method='linear'
         )
         self.h_grid_src = torch.from_numpy(h_grid_src)
