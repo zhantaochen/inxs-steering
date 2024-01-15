@@ -62,3 +62,20 @@ def rad_arrow(ax, angle=90., start_radius=1., end_radius=1.2, arrow_size=0.05, c
                 rotation=np.degrees(angle) - 90,
                 rotation_mode='anchor',
                 fontsize=12)
+        
+def visualize_utility(angle, utility, ax=None):
+    
+    utility = (utility - utility.min()) / (utility.max() - utility.min())
+    
+    if ax is None:
+        # Create a figure and an axis with a polar projection
+        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+
+    # Plot data on the polar axis
+    ax.plot(angle / 360 * 2 * np.pi, utility, color='r', linewidth=2)
+    arc_arrow(ax, start_angle=55, end_angle=80, radius=utility.max() * 1, arrow_size=0.025, label='$\psi$')
+    rad_arrow(ax, angle=135/2, start_radius=utility.max() * 0.85, end_radius=utility.max() * 1.15, arrow_size=0.025, label='$U(\psi)$')
+
+    ax.set_rlim([0, 1.2])
+
+    return ax

@@ -83,7 +83,7 @@ class NeutronExperiment:
     
 class Background:
     
-    def __init__(self, q_grid, w_grid, bkg_grid, scale, scale_separator):
+    def __init__(self, q_grid, w_grid, bkg_grid):
         """
         q_grid: tuple of (h_grid, k_grid, l_grid), each of shape (num_qi) for i = h,k,l
         w_grid: array of shape (num_w,)
@@ -93,8 +93,6 @@ class Background:
         self.k_grid = convert_to_torch(q_grid[1])
         self.l_grid = convert_to_torch(q_grid[2])
         self.w_grid = convert_to_torch(w_grid)
-        self.scale = scale
-        self.scale_separator = scale_separator
 
         self.bkg_func = RegularGridInterpolator(
             [convert_to_numpy(_) for _ in [q_grid[0], q_grid[1], q_grid[2], w_grid]],
