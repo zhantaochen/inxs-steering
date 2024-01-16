@@ -83,6 +83,7 @@ class NeutronExperimentSteerer:
     
     def compute_utility(self,):
         utility = self._compute_utility()
+        # utility_sf = torch.ones_like(utility)
         if len(self.measured_angles_history) > 0:
             utility_sf = self.compute_utility_scaling_factor(self.measured_angles_history[-1])
         else:
@@ -107,7 +108,7 @@ class NeutronExperimentSteerer:
         weighted_mean = torch.sum((output_list * self.particle_filter.weights[:,None]) / self.particle_filter.weights.sum(), dim=0)
         weighted_std = torch.sum(((output_list - weighted_mean[None,:]).pow(2) * self.particle_filter.weights[:,None]) / self.particle_filter.weights.sum(), dim=0).sqrt()
         return weighted_std.view(self.psi_mask.hkw_grid.shape[:-1])
-        
+    
     def compute_prediction_std_over_sampled_parameters(self,):
         
         sampled_particles, sampled_particle_weights = self.particle_filter.random_subset(proportion=0.1)
@@ -203,25 +204,33 @@ class NeutronExperimentSteerer:
             
             pred_measurement = _background * factors[0] + predictions * factors[1]
         else:
-            pred_measurement = pred_measurement / pred_measurement.mean() * next_measurement.mean()
+            pred_measurement = predictions / predictions.mean() * next_measurement.mean()
+            # pred_measurement = 1000. * predictions.clip(0.)
         
-        pred_measurement = torch.log(1 + pred_measurement)
-        next_measurement = torch.log(1 + next_measurement)
+        # pred_measurement = torch.log(1 + pred_measurement)
+        # next_measurement = torch.log(1 + next_measurement)
         
-        likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / next_measurement[None].sqrt()).pow(2)).mean(dim=-1)
+        likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / (next_measurement[None].sqrt() + 1e-10)).pow(2)).mean(dim=-1)
         # likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / next_measurement[None]).pow(2)).mean(dim=-1)
         torch.nan_to_num(likelihood, nan=0., posinf=0., neginf=0., out=likelihood)
         return likelihood
     
     @torch.no_grad()
-    def step_steer(self, ):
+    def step_steer(self, mode='unique_optimal'):
         
-        # next_angle = self.get_good_angle()
-        # next_angle = self.get_optimal_angle()
-        next_angle = self.get_unique_optimal_angle()
+        if mode == 'unique_optimal':
+            next_angle = self.get_unique_optimal_angle()
+        elif mode == 'optimal':
+            next_angle = self.get_optimal_angle()
+        elif mode == 'good':
+            next_angle = self.get_good_angle()
+        else:
+            raise ValueError("mode must be one of 'unique_optimal', 'optimal', 'good'")
+            
         if self.tqdm_pbar:
             print("next angle:", next_angle)
-        next_mask = self.psi_mask.load_memmap_mask(next_angle)
+        next_mask = self.psi_mask.load_memmap_mask(next_angle).bool()
+        # print(next_mask)
         
         next_measurement = self.experiment.get_measurements_by_mask(next_mask)
         # likelihood_mask = next_measurement > next_measurement.max() * self.likelihood_sample_ratio
@@ -232,8 +241,15 @@ class NeutronExperimentSteerer:
         next_measurement = next_measurement[likelihood_mask]
         
         likelihood = self.compute_likelihood(next_measurement, next_mask, likelihood_mask)
+        # print(likelihood.max(), likelihood.min())
+        
         # this is very dirty, need to look into later
-        likelihood_normed = (likelihood - likelihood.min()) / (likelihood.max() - likelihood.min())
+        if likelihood.max() == likelihood.min():
+            # likelihood_normed = torch.ones_like(likelihood)
+            likelihood_normed = torch.rand_like(likelihood)
+        else:
+            likelihood_normed = (likelihood - likelihood.min()) / (likelihood.max() - likelihood.min())
+            
         # likelihood_normed = likelihood
         
         self.particle_filter.bayesian_update(likelihood_normed)

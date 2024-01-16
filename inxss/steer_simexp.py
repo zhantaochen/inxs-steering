@@ -207,6 +207,7 @@ class SimulatedExperimentSteerer:
         if self.tqdm_pbar:
             print("next angle:", next_angle)
         next_mask = self.psi_mask.load_memmap_mask(next_angle)
+        next_mask = next_mask.int()
         
         next_measurement = self.experiment.get_measurements_by_mask(next_mask, poisson=False)
         likelihood_mask = next_measurement > next_measurement.max() * self.likelihood_mask_threshold
@@ -214,7 +215,8 @@ class SimulatedExperimentSteerer:
         
         likelihood = self.compute_likelihood(next_measurement, next_mask, likelihood_mask)
         # this is very dirty, need to look into later
-        likelihood_normed = (likelihood - likelihood.min()) / (likelihood.max() - likelihood.min())
+        print(likelihood.max(), likelihood.min())
+        likelihood_normed = (likelihood - likelihood.min()) / (likelihood.max() - likelihood.min() + 1e-10)
         # likelihood_normed = likelihood
         
         self.particle_filter.bayesian_update(likelihood_normed)
