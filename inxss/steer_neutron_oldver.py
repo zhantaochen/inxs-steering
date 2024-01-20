@@ -15,7 +15,6 @@ class NeutronExperimentSteerer:
         experiment_config,
         background_config=None,
         likelihood_sample_ratio=0.1,
-        utility_sf_sigma=180.0,
         tqdm_pbar=True,
         dtype=torch.float32,
         device='cpu'
@@ -34,8 +33,6 @@ class NeutronExperimentSteerer:
         if self.background is not None:
             self.background.prepare_experiment(self.psi_mask.hklw_grid)
         
-        self.utility_sf_sigma = utility_sf_sigma
-        
         self.dtype = dtype
         self.device = device
         self.model = model.to(self.device)
@@ -45,15 +42,13 @@ class NeutronExperimentSteerer:
         
         self.get_mask_on_full_psi_grid()
         
-        self.utility_history = []
-        self.measured_angles_history = []
-        self.sig_bkg_factors_history = []
+        self.measured_angles = []
+        self.sig_bkg_factors = []
     
     def reset(self):
         self.particle_filter.reset()
-        self.utility_history = []
-        self.measured_angles_history = []
-        self.sig_bkg_factors_history = []
+        self.measured_angles = []
+        self.sig_bkg_factors = []
     
     def _progress_bar(self, iterable, **kwargs):
         if self.tqdm_pbar:
@@ -68,27 +63,11 @@ class NeutronExperimentSteerer:
         self.mask_on_full_psi_grid = torch.stack(mask)
         self.attainable_mask_on_full_psi_grid = (self.mask_on_full_psi_grid.sum(dim=0) > 0).view(-1)
     
-    def compute_utility_scaling_factor(self, current_angle):
-        angles = self.psi_mask.psi_grid - current_angle
-        angles[angles > 180] -= 360
-        angles[angles <-180] += 360
-        sf = torch.exp(-0.5 * angles.pow(2) / self.utility_sf_sigma**2)
-        return sf
-    
-    def _compute_utility(self,):
+    def compute_utility(self,):
         # std = self.compute_prediction_std_over_parameters()
         std = self.compute_prediction_std_over_sampled_parameters()
-        utility = torch.einsum("ijkl, jkl -> i", self.mask_on_full_psi_grid.to(std), std)
+        utility = torch.einsum("ijkl, jkl -> i", self.mask_on_full_psi_grid.to(std), std)        
         return utility
-    
-    def compute_utility(self,):
-        utility = self._compute_utility()
-        # utility_sf = torch.ones_like(utility)
-        if len(self.measured_angles_history) > 0:
-            utility_sf = self.compute_utility_scaling_factor(self.measured_angles_history[-1])
-        else:
-            utility_sf = torch.ones_like(utility)
-        return utility * utility_sf
         
     def compute_prediction_std_over_all_parameters(self,):
         
@@ -108,7 +87,7 @@ class NeutronExperimentSteerer:
         weighted_mean = torch.sum((output_list * self.particle_filter.weights[:,None]) / self.particle_filter.weights.sum(), dim=0)
         weighted_std = torch.sum(((output_list - weighted_mean[None,:]).pow(2) * self.particle_filter.weights[:,None]) / self.particle_filter.weights.sum(), dim=0).sqrt()
         return weighted_std.view(self.psi_mask.hkw_grid.shape[:-1])
-    
+        
     def compute_prediction_std_over_sampled_parameters(self,):
         
         sampled_particles, sampled_particle_weights = self.particle_filter.random_subset(proportion=0.1)
@@ -137,22 +116,13 @@ class NeutronExperimentSteerer:
         
     def get_optimal_angle(self,):
         utility = self.compute_utility()
-        optimal_psi = self.psi_mask.psi_grid[utility.argmax()]
-        
-        self.utility_history.append(utility.cpu().numpy().squeeze())
-        self.measured_angles_history.append(optimal_psi.cpu().numpy())
-        return optimal_psi
+        return self.psi_mask.psi_grid[utility.argmax()]
     
     def get_good_angle(self,):
         utility = self.compute_utility()
         p = torch.nn.functional.softmax(utility / (self.experiment.S_scale_factor / 5), dim=0).detach().cpu().numpy()
         idx = np.random.choice(np.arange(utility.shape[0]), 1, p=p)
-        
-        good_psi = self.psi_mask.psi_grid[idx]
-        
-        self.utility_history.append(utility.cpu().numpy().squeeze())
-        self.measured_angles_history.append(good_psi.cpu().numpy())
-        return good_psi
+        return self.psi_mask.psi_grid[idx]
     
     def get_unique_optimal_angle(self,):
         utility = self.compute_utility()
@@ -162,15 +132,12 @@ class NeutronExperimentSteerer:
         # Iterate over the sorted utility indices to get the highest utility angle that hasn't been measured
         for index in sorted_indices:
             psi_candidate = self.psi_mask.psi_grid[index]
-            if psi_candidate.cpu().numpy() not in self.measured_angles_history:
-                
-                self.utility_history.append(utility.cpu().numpy().squeeze())
-                self.measured_angles_history.append(psi_candidate.cpu().numpy())  # Store the newly measured angle
+            if psi_candidate not in self.measured_angles:
+                self.measured_angles.append(psi_candidate)  # Store the newly measured angle
                 return psi_candidate
 
         # If all angles have been measured, return None or handle this case appropriately
         # return None
-        print("All angles have been measured. Returning the best angle in the list.")
         return self.get_good_angle()
     
     def solve_background_signal_factors(self, measurement, background, signal):
@@ -200,37 +167,43 @@ class NeutronExperimentSteerer:
         if self.background is not None:
             _background = self.background.get_background_by_mask(next_mask)[likelihood_mask].clone()
             factors = self.solve_background_signal_factors(next_measurement, _background, predictions.mean(dim=0))
-            self.sig_bkg_factors_history.append(factors)
+            self.sig_bkg_factors.append(factors)
             
             pred_measurement = _background * factors[0] + predictions * factors[1]
+            
+            # _mask_inner =  x_input[...,:2].norm(dim=-1)  <= self.background.scale_separator['inner_mid']
+            # _mask_mid   = (x_input[...,:2].norm(dim=-1)  >  self.background.scale_separator['inner_mid']) * (x_input[...,:2].norm(dim=-1) <= self.background.scale_separator['mid_outer'])
+            # _mask_outer =  x_input[...,:2].norm(dim=-1)  >  self.background.scale_separator['mid_outer']
+            
+            # _mask_inner = _mask_inner * exist_signal_in_exp
+            # _mask_mid   = _mask_mid   * exist_signal_in_exp
+            # _mask_outer = _mask_outer * exist_signal_in_exp
+            
+            # pred_measurement = self.background.get_background_by_mask(next_mask)[likelihood_mask].clone().unsqueeze(0).repeat(self.particle_filter.num_particles, 1)
+            
+            # pred_measurement[_mask_inner] += predictions[_mask_inner] * self.background.scale['inner']['scale_factor']
+            # pred_measurement[_mask_mid]   += predictions[_mask_mid]   * self.background.scale['mid']['scale_factor']
+            # pred_measurement[_mask_outer] += predictions[_mask_outer] * self.background.scale['outer']['scale_factor']
         else:
-            pred_measurement = predictions / predictions.mean() * next_measurement.mean()
-            # pred_measurement = 1000. * predictions.clip(0.)
+            pred_measurement = pred_measurement / pred_measurement.mean() * next_measurement.mean()
         
         pred_measurement = torch.log(1 + pred_measurement)
         next_measurement = torch.log(1 + next_measurement)
         
-        likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / (next_measurement[None].sqrt() + 1e-10)).pow(2)).mean(dim=-1)
+        likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / next_measurement[None].sqrt()).pow(2)).mean(dim=-1)
         # likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / next_measurement[None]).pow(2)).mean(dim=-1)
         torch.nan_to_num(likelihood, nan=0., posinf=0., neginf=0., out=likelihood)
         return likelihood
     
     @torch.no_grad()
-    def step_steer(self, mode='unique_optimal'):
+    def step_steer(self, ):
         
-        if mode == 'unique_optimal':
-            next_angle = self.get_unique_optimal_angle()
-        elif mode == 'optimal':
-            next_angle = self.get_optimal_angle()
-        elif mode == 'good':
-            next_angle = self.get_good_angle()
-        else:
-            raise ValueError("mode must be one of 'unique_optimal', 'optimal', 'good'")
-            
+        # next_angle = self.get_good_angle()
+        # next_angle = self.get_optimal_angle()
+        next_angle = self.get_unique_optimal_angle()
         if self.tqdm_pbar:
             print("next angle:", next_angle)
-        next_mask = self.psi_mask.load_memmap_mask(next_angle).bool()
-        # print(next_mask)
+        next_mask = self.psi_mask.load_memmap_mask(next_angle)
         
         next_measurement = self.experiment.get_measurements_by_mask(next_mask)
         # likelihood_mask = next_measurement > next_measurement.max() * self.likelihood_sample_ratio
@@ -241,15 +214,8 @@ class NeutronExperimentSteerer:
         next_measurement = next_measurement[likelihood_mask]
         
         likelihood = self.compute_likelihood(next_measurement, next_mask, likelihood_mask)
-        # print(likelihood.max(), likelihood.min())
-        
         # this is very dirty, need to look into later
-        if likelihood.max() == likelihood.min():
-            # likelihood_normed = torch.ones_like(likelihood)
-            likelihood_normed = torch.rand_like(likelihood)
-        else:
-            likelihood_normed = (likelihood - likelihood.min()) / (likelihood.max() - likelihood.min())
-            
+        likelihood_normed = (likelihood - likelihood.min()) / (likelihood.max() - likelihood.min())
         # likelihood_normed = likelihood
         
         self.particle_filter.bayesian_update(likelihood_normed)
