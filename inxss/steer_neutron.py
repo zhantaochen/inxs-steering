@@ -15,7 +15,7 @@ class NeutronExperimentSteerer:
         experiment_config,
         background_config=None,
         likelihood_sample_ratio=0.1,
-        utility_sf_sigma=180.0,
+        utility_sf_sigma=90.0,
         tqdm_pbar=True,
         dtype=torch.float32,
         device='cpu'
@@ -88,7 +88,7 @@ class NeutronExperimentSteerer:
             utility_sf = self.compute_utility_scaling_factor(self.measured_angles_history[-1])
         else:
             utility_sf = torch.ones_like(utility)
-        return utility * utility_sf
+        return utility * utility_sf.to(utility)
         
     def compute_prediction_std_over_all_parameters(self,):
         
@@ -127,7 +127,7 @@ class NeutronExperimentSteerer:
                 _output = torch.zeros(_input.shape[:-1]).to(_input)
                 _output[:,self.attainable_mask_on_full_psi_grid] = self.model(_input[:,self.attainable_mask_on_full_psi_grid].to(self.device)).detach().cpu()
                 output_list.append(_output)
-        output_list = torch.cat(output_list, dim=0)
+        output_list = torch.cat(output_list, dim=0).to(sampled_particle_weights)
         weighted_mean = torch.sum((output_list * sampled_particle_weights[:,None]) / sampled_particle_weights.sum(), dim=0)
         weighted_std = torch.sum(((output_list - weighted_mean[None,:]).pow(2) * sampled_particle_weights[:,None]) / sampled_particle_weights.sum(), dim=0).sqrt()
         return weighted_std.view(self.psi_mask.hkw_grid.shape[:-1])
@@ -210,7 +210,8 @@ class NeutronExperimentSteerer:
         pred_measurement = torch.log(1 + pred_measurement)
         next_measurement = torch.log(1 + next_measurement)
         
-        likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / (next_measurement[None].sqrt() + 1e-10)).pow(2)).mean(dim=-1)
+        # likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / (next_measurement[None].sqrt() + 1e-10)).pow(2)).mean(dim=-1)
+        likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / (1.)).pow(2)).mean(dim=-1)
         # likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / next_measurement[None]).pow(2)).mean(dim=-1)
         torch.nan_to_num(likelihood, nan=0., posinf=0., neginf=0., out=likelihood)
         return likelihood
