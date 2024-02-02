@@ -36,6 +36,7 @@ class SimulatedExperiment:
     
     def prepare_experiment(self, coords):
         self.Sqw = self.get_measurements_on_coords(coords, poisson=False)
+        self.Sqw = self.Sqw.clamp_min(0.0)
     
     def get_measurements_by_mask(self, mask, poisson=True):
         S_out = self.Sqw[mask]
@@ -72,6 +73,7 @@ class NeutronExperiment:
     
     def prepare_experiment(self, coords):
         self.Sqw = torch.from_numpy(self.get_measurements_on_coords(coords))
+        self.Sqw = self.Sqw.clamp_min(0.0)
     
     def get_measurements_by_mask(self, mask):
         S_out = self.Sqw[mask]
@@ -102,6 +104,7 @@ class Background:
     
     def prepare_experiment(self, coords):
         self.bkg_qw = torch.from_numpy(self.get_background_on_coords(coords))
+        self.bkg_qw = self.bkg_qw.clamp_min(0.0)
     
     def get_background_by_mask(self, mask):
         S_out = self.bkg_qw[mask]

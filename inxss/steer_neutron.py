@@ -14,14 +14,24 @@ class NeutronExperimentSteerer:
         mask_config,
         experiment_config,
         background_config=None,
-        likelihood_sample_ratio=0.1,
         utility_sf_sigma=90.0,
         tqdm_pbar=True,
+        lkhd_dict=None,
         dtype=torch.float32,
         device='cpu'
         ):
 
         torch.set_default_dtype(dtype)
+        
+        if lkhd_dict is None:
+            self.lkhd_dict = {
+                'type': 'gaussian',
+                'scale': True,
+                'std': 0.1,
+                'sample_ratio': 0.25
+            }
+        else:
+            self.lkhd_dict = lkhd_dict
         
         self.psi_mask = PsiMask(**mask_config)
         self.particle_filter = Particle(**particle_filter_config).to(device).to(dtype)
@@ -41,7 +51,6 @@ class NeutronExperimentSteerer:
         self.model = model.to(self.device)
         
         self.tqdm_pbar = tqdm_pbar
-        self.likelihood_sample_ratio = likelihood_sample_ratio
         
         self.get_mask_on_full_psi_grid()
         
@@ -207,12 +216,15 @@ class NeutronExperimentSteerer:
             pred_measurement = predictions / predictions.mean() * next_measurement.mean()
             # pred_measurement = 1000. * predictions.clip(0.)
         
-        pred_measurement = torch.log(1 + pred_measurement)
-        next_measurement = torch.log(1 + next_measurement)
+        # pred_measurement = torch.log(1 + pred_measurement)
+        # next_measurement = torch.log(1 + next_measurement)
         
-        # likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / (next_measurement[None].sqrt() + 1e-10)).pow(2)).mean(dim=-1)
-        likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / (1.)).pow(2)).mean(dim=-1)
-        # likelihood = torch.exp(-0.5 * ((pred_measurement - next_measurement[None]) / next_measurement[None]).pow(2)).mean(dim=-1)
+        if self.lkhd_dict['type'] == 'gaussian':
+            likelihood = torch.exp(-0.5 * ((pred_measurement.clamp_min(0.) - next_measurement[None]) / self.lkhd_dict['std']).pow(2)).mean(dim=-1)
+        elif self.lkhd_dict['type'] == 'poisson':
+            nll = torch.nn.functional.poisson_nll_loss(pred_measurement.clamp_min(0), next_measurement[None], log_input=False, full=True, reduction='none').mean(dim=-1)
+            likelihood = torch.exp(-nll)
+        
         torch.nan_to_num(likelihood, nan=0., posinf=0., neginf=0., out=likelihood)
         return likelihood
     
@@ -231,26 +243,23 @@ class NeutronExperimentSteerer:
         if self.tqdm_pbar:
             print("next angle:", next_angle)
         next_mask = self.psi_mask.load_memmap_mask(next_angle).bool()
-        # print(next_mask)
         
         next_measurement = self.experiment.get_measurements_by_mask(next_mask)
-        # likelihood_mask = next_measurement > next_measurement.max() * self.likelihood_sample_ratio
         
         likelihood_mask = torch.zeros_like(next_measurement, dtype=torch.bool)
-        likelihood_mask[np.random.choice(np.arange(likelihood_mask.shape[0]), min(150, int(likelihood_mask.shape[0] * self.likelihood_sample_ratio)), replace=False)] = True
+        likelihood_mask[np.random.choice(np.arange(likelihood_mask.shape[0]), min(150, int(likelihood_mask.shape[0] * self.lkhd_dict['sample_ratio'])), replace=False)] = True
         
         next_measurement = next_measurement[likelihood_mask]
         
         likelihood = self.compute_likelihood(next_measurement, next_mask, likelihood_mask)
-        # print(likelihood.max(), likelihood.min())
         
-        # this is very dirty, need to look into later
-        if likelihood.max() == likelihood.min():
-            # likelihood_normed = torch.ones_like(likelihood)
-            likelihood_normed = torch.rand_like(likelihood)
+        if self.lkhd_dict['scale']:
+            # this is very dirty, need to look into later
+            if likelihood.max() == likelihood.min():
+                likelihood_normed = torch.rand_like(likelihood)
+            else:
+                likelihood_normed = (likelihood - likelihood.min()) / (likelihood.max() - likelihood.min())
         else:
-            likelihood_normed = (likelihood - likelihood.min()) / (likelihood.max() - likelihood.min())
-            
-        # likelihood_normed = likelihood
+            likelihood_normed = likelihood
         
         self.particle_filter.bayesian_update(likelihood_normed)
