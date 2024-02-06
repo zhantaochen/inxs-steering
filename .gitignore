@@ -4,4 +4,5 @@ figures/
 inxss/.ipynb_checkpoints/
 paper_preparation/
 slurm_bash/
+outputs/
 *.pyc
