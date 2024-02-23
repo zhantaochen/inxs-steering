@@ -106,11 +106,11 @@ def main(cfg : DictConfig):
 
         steer.reset()
 
-        mean_list = [steer.particle_filter.mean().detach().cpu()]
-        std_list = [steer.particle_filter.std().detach().cpu()]
+        mean_list = [steer.particle_filter.mean().detach().cpu().clone()]
+        std_list = [steer.particle_filter.std().detach().cpu().clone()]
 
-        posisition_list = [steer.particle_filter.positions.data.T[None].cpu()]
-        weights_list = [steer.particle_filter.weights.data[None].cpu()]
+        posisition_list = [steer.particle_filter.positions.data.T[None].cpu().clone()]
+        weights_list = [steer.particle_filter.weights.data[None].cpu().clone()]
 
         with torch.no_grad():
             progress_bar = tqdm(range(num_steps))
@@ -122,19 +122,20 @@ def main(cfg : DictConfig):
                     f'means: [{current_mean[0]:.3f}, {current_mean[1]:.3f}] '
                     f' stds: [{current_std[0]:.3f}, {current_std[1]:.3f}]'
                 )
-                mean_list.append(current_mean)
-                std_list.append(current_std)
+                mean_list.append(current_mean.clone())
+                std_list.append(current_std.clone())
 
-                posisition_list.append(steer.particle_filter.positions.data.T[None].cpu())
-                weights_list.append(steer.particle_filter.weights.data[None].cpu())
+                posisition_list.append(steer.particle_filter.positions.data.T[None].cpu().clone())
+                weights_list.append(steer.particle_filter.weights.data[None].cpu().clone())
 
         sub_result_dict = {
             'means': torch.vstack(mean_list).double(),
             'positions': torch.vstack(posisition_list).double(),
             'weights': torch.vstack(weights_list).double(),
-            'utility': torch.from_numpy(np.vstack(steer.utility_history).squeeze()).double(),
             'measured_angles': torch.from_numpy(np.vstack(steer.measured_angles_history).squeeze()).double(),
             'background_signal_factors': torch.stack(steer.sig_bkg_factors_history).double(),
+            'utility': torch.from_numpy(np.vstack(steer.utility_history).squeeze()).double(),
+            'likelihood': torch.from_numpy(np.vstack(steer.lkhd_history).squeeze()).double(),
             'true_params': torch.tensor([29.0, 1.68]).double(),
         }
 

@@ -55,12 +55,14 @@ class NeutronExperimentSteerer:
         self.get_mask_on_full_psi_grid()
         
         self.utility_history = []
+        self.lkhd_history = []
         self.measured_angles_history = []
         self.sig_bkg_factors_history = []
     
     def reset(self):
         self.particle_filter.reset()
         self.utility_history = []
+        self.lkhd_history = []
         self.measured_angles_history = []
         self.sig_bkg_factors_history = []
     
@@ -261,5 +263,6 @@ class NeutronExperimentSteerer:
                 likelihood_normed = (likelihood - likelihood.min()) / (likelihood.max() - likelihood.min())
         else:
             likelihood_normed = likelihood
+        self.lkhd_history.append(likelihood_normed.detach().cpu().numpy().squeeze())
         
         self.particle_filter.bayesian_update(likelihood_normed)
