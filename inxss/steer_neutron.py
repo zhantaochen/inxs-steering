@@ -224,8 +224,9 @@ class NeutronExperimentSteerer:
         if self.lkhd_dict['type'] == 'gaussian':
             likelihood = torch.exp(-0.5 * ((pred_measurement.clamp_min(0.) - next_measurement[None]) / self.lkhd_dict['std']).pow(2)).mean(dim=-1)
         elif self.lkhd_dict['type'] == 'poisson':
-            nll = torch.nn.functional.poisson_nll_loss(pred_measurement.clamp_min(0), next_measurement[None], log_input=False, full=True, reduction='none').mean(dim=-1)
-            likelihood = torch.exp(-nll)
+            nll = torch.nn.functional.poisson_nll_loss(pred_measurement.clamp_min(0), next_measurement[None], 
+                                                       log_input=False, full=True, reduction='none')
+            likelihood = torch.exp(-nll).mean(dim=-1)
         
         torch.nan_to_num(likelihood, nan=0., posinf=0., neginf=0., out=likelihood)
         return likelihood
