@@ -224,6 +224,7 @@ class NeutronExperimentSteerer:
         if self.lkhd_dict['type'] == 'gaussian':
             likelihood = torch.exp(-0.5 * ((pred_measurement.clamp_min(0.) - next_measurement[None]) / self.lkhd_dict['std']).pow(2)).mean(dim=-1)
         elif self.lkhd_dict['type'] == 'poisson':
+            # target ~ Poisson(pred)
             nll = torch.nn.functional.poisson_nll_loss(pred_measurement.clamp_min(0), next_measurement[None], 
                                                        log_input=False, full=True, reduction='none')
             likelihood = torch.exp(-nll).mean(dim=-1)
@@ -240,6 +241,10 @@ class NeutronExperimentSteerer:
             next_angle = self.get_optimal_angle()
         elif mode == 'good':
             next_angle = self.get_good_angle()
+        elif mode == 'sequential':
+            next_angle = self.psi_mask.psi_grid[len(self.measured_angles_history)]
+        elif mode == 'random':
+            next_angle = self.psi_mask.psi_grid[np.random.choice(np.arange(len(self.psi_mask.psi_grid)))]
         else:
             raise ValueError("mode must be one of 'unique_optimal', 'optimal', 'good'")
             

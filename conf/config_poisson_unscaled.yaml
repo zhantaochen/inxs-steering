@@ -1,0 +1,16 @@
+general:
+  num_steps: 50
+
+likelihood:
+  type: "poisson"
+  std : 0.1
+  scale: false
+  sample_ratio: 0.25
+
+paths:
+  model_path: "/pscratch/sd/z/zhantao/inxs_steering_production/models/version_14896845/checkpoints/epoch=7160-step=343728.ckpt"
+  data_path: "/pscratch/sd/z/zhantao/inxs_steering_production/experiment_data/summarized_neutron_data_w_bkg_260meV_ML.pt"
+  output_path: "/pscratch/sd/z/zhantao/inxs_steering_production/benchmarks"
+  raw_mask_path: "/pscratch/sd/z/zhantao/inxs_steering_production/mask/La2NiO4_bool_by_angles"
+  memmap_mask_path: "/pscratch/sd/z/zhantao/inxs_steering_production/mask/memmap_mask"
+  spinw_data_path: "/pscratch/sd/z/zhantao/inxs_steering/SpinW_data/summarized_AFM_data_2023Sep13.pt"
