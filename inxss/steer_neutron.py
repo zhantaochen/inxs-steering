@@ -233,7 +233,7 @@ class NeutronExperimentSteerer:
         return likelihood
     
     @torch.no_grad()
-    def step_steer(self, mode='unique_optimal'):
+    def step_steer(self, mode='unique_optimal', next_angle=None):
         
         if mode == 'unique_optimal':
             next_angle = self.get_unique_optimal_angle()
@@ -241,10 +241,9 @@ class NeutronExperimentSteerer:
             next_angle = self.get_optimal_angle()
         elif mode == 'good':
             next_angle = self.get_good_angle()
-        elif mode == 'sequential':
-            next_angle = self.psi_mask.psi_grid[len(self.measured_angles_history)]
-        elif mode == 'random':
-            next_angle = self.psi_mask.psi_grid[np.random.choice(np.arange(len(self.psi_mask.psi_grid)))]
+        elif mode == 'custom':
+            next_angle = next_angle
+            self.measured_angles_history.append(next_angle)
         else:
             raise ValueError("mode must be one of 'unique_optimal', 'optimal', 'good'")
             
