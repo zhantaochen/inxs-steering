@@ -44,6 +44,9 @@ def main(cfg : DictConfig):
             cfg['paths']['output_path'],
             f"EXP_lkhd_{likelihood_type}_scaled_{scale_likelihood}_steps_{num_steps}_{time_stamp}"
         )
+    if 'steer' in cfg:
+        output_path = output_path + f"_steer_{cfg['steer']['mode']}_{cfg['steer']['start']}_{cfg['steer']['end']}_{num_steps}"
+        
     if not os.path.exists(output_path):
         os.makedirs(output_path)
     print('output_path:', output_path)
@@ -111,11 +114,29 @@ def main(cfg : DictConfig):
 
         posisition_list = [steer.particle_filter.positions.data.T[None].cpu().clone()]
         weights_list = [steer.particle_filter.weights.data[None].cpu().clone()]
+        
+        if not 'steer' in cfg:
+            steer_mode = 'unique_optimal'
+            angles = [None,] * num_steps
+        else:
+            if cfg['steer']['mode'] == 'sequential':
+                steer_mode = 'custom'
+                angles = np.round(np.linspace(cfg['steer']['start'], cfg['steer']['end'], num_steps))
+            elif cfg['steer']['mode'] == 'random':
+                steer_mode = 'custom'
+                angles = np.round(np.linspace(cfg['steer']['start'], cfg['steer']['end'], num_steps))
+                np.random.shuffle(angles)
+            else:
+                steer_mode = cfg['steer']['mode']
+                angles = [None,] * num_steps
+
+        print("steer mode: ", steer_mode)
+        print("angles: \n", angles)
 
         with torch.no_grad():
             progress_bar = tqdm(range(num_steps))
             for i in progress_bar:
-                steer.step_steer(mode='unique_optimal')
+                steer.step_steer(mode=steer_mode, next_angle=angles[i])
                 current_mean = steer.particle_filter.mean().detach().cpu()
                 current_std = steer.particle_filter.std().detach().cpu()
                 progress_bar.set_description(

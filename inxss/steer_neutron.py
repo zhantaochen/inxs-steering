@@ -244,6 +244,7 @@ class NeutronExperimentSteerer:
         elif mode == 'custom':
             next_angle = next_angle
             self.measured_angles_history.append(next_angle)
+            self.utility_history.append(torch.zeros_like(self.psi_mask.psi_grid).cpu().numpy().squeeze())
         else:
             raise ValueError("mode must be one of 'unique_optimal', 'optimal', 'good'")
             

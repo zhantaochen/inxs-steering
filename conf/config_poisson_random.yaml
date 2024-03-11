@@ -9,8 +9,8 @@ likelihood:
 
 steer:
   mode: "random"
-  start: -30
-  end: 30
+  start: -180
+  end: 179
 
 paths:
   model_path: "/pscratch/sd/z/zhantao/inxs_steering_production/models/version_14896845/checkpoints/epoch=7160-step=343728.ckpt"
