@@ -9,6 +9,7 @@ from tqdm import tqdm
 from inxss.experiment import Background, SimulatedExperiment
 from inxss.steer_neutron import NeutronExperimentSteerer
 from sklearn.model_selection import train_test_split
+from scipy.ndimage import gaussian_filter
 
 import os
 from datetime import datetime
@@ -54,12 +55,15 @@ def main(cfg : DictConfig):
     data = torch.load(cfg['paths']['data_path'])
     global_mask = (data['S']>0).bool()
 
-    particle_filter_config = {
-        "num_particles": 1000,
-        "dim_particles": 2,
-        "prior_configs": {'types': ['uniform', 'uniform'], 'args': [{'low': 20, 'high': 40}, {'low': -5, 'high': 5}]}
-    }
-
+    if 'particle_filter' in cfg:
+        particle_filter_config = cfg['particle_filter']
+        print('loading particle filter from config file...')
+    else:
+        particle_filter_config = {
+            "num_particles": 1000,
+            "dim_particles": 2,
+            "prior_configs": {'types': ['uniform', 'uniform'], 'args': [{'low': 20, 'high': 40}, {'low': -5, 'high': 5}]}
+        }
     grid_info = {
         k: [v.min().item(), v.max().item(), len(v)] for k,v in data['grid'].items()
     }
@@ -76,17 +80,78 @@ def main(cfg : DictConfig):
 
 
     for idx_sample in tqdm(test_idx):
+        # sim_experiment = SimulatedExperiment(
+        #     spinw_data['q_grid'], spinw_data['w_grid'], 
+        #     spinw_data['Syy'][idx_sample], spinw_data['Szz'][idx_sample],
+        #     neutron_flux=300
+        # )
+        # sim_experiment.prepare_experiment(psi_mask.hklw_grid)
+        # experiment_config = {
+        #     "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
+        #     "w_grid": data['grid']['w_grid'],
+        #     "S_grid": torch.from_numpy(data['background']) + \
+        #         global_mask * sim_experiment.Sqw,
+        #     "S_scale_factor": 1.
+        # }
+
+        # background_config = {
+        #     "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
+        #     "w_grid": data['grid']['w_grid'],
+        #     "bkg_grid": data['background']
+        # }
+
+        # model = SpecNeuralRepr.load_from_checkpoint(model_path).to(device)
+
+        # steer = NeutronExperimentSteerer(
+        #     model, particle_filter_config=particle_filter_config,
+        #     mask_config=mask_config, experiment_config=experiment_config, background_config=background_config,
+        #     tqdm_pbar=False, lkhd_dict=cfg['likelihood'], device=device)
+        
         sim_experiment = SimulatedExperiment(
             spinw_data['q_grid'], spinw_data['w_grid'], 
             spinw_data['Syy'][idx_sample], spinw_data['Szz'][idx_sample],
-            neutron_flux=300
+            neutron_flux=1
         )
+
         sim_experiment.prepare_experiment(psi_mask.hklw_grid)
+
+
+        hklw_grid_norm = psi_mask.hklw_grid[...,:2].norm(dim=-1)
+        q_inn_mid = 1.1441
+        q_mid_out = 1.8512
+
+        mask_inn = (hklw_grid_norm <= q_inn_mid).numpy()
+        mask_mid = (hklw_grid_norm >  q_inn_mid).numpy() * (hklw_grid_norm <=  q_mid_out).numpy()
+        mask_out = (hklw_grid_norm >  q_mid_out).numpy()
+
+        sigmas = []
+        scales = []
+        mask_exp = data['S'] > 1e-10
+
+        for reg in ['inn', 'mid', 'out']:
+            idx_sigma, idx_scale = np.where(data['background_dict'][f'{reg}_ddv'] == data['background_dict'][f'{reg}_ddv'].min())
+            _sigma = data['background_dict']['sigmas'][idx_sigma]
+            _scale = data['background_dict']['scales'][idx_scale]
+            print('sigma: ', _sigma, '   scale: ', _scale)
+            scales.append(_scale[0])
+            sigmas.append(_sigma[0])
+        centers = np.array([0.5 * np.sqrt(2), np.sqrt(1.5 ** 2 + 0.5 ** 2), 1.5 * np.sqrt(2)])
+        scales = np.array(scales).squeeze()
+
+        s_pred_masked_sm_inn = gaussian_filter(sim_experiment.Sqw, sigmas[0]) * mask_exp.numpy()
+        s_pred_masked_sm_mid = gaussian_filter(sim_experiment.Sqw, sigmas[1]) * mask_exp.numpy()
+        s_pred_masked_sm_out = gaussian_filter(sim_experiment.Sqw, sigmas[2]) * mask_exp.numpy()
+        interped_scales = np.interp(hklw_grid_norm.numpy(), centers, scales)
+        Sqw_syn = np.zeros_like(sim_experiment.Sqw)
+        Sqw_syn[mask_inn] = s_pred_masked_sm_inn[mask_inn] * interped_scales[mask_inn]
+        Sqw_syn[mask_mid] = s_pred_masked_sm_mid[mask_mid] * interped_scales[mask_mid]
+        Sqw_syn[mask_out] = s_pred_masked_sm_out[mask_out] * interped_scales[mask_out]
+        Sqw_syn += data['background']
+
         experiment_config = {
             "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
             "w_grid": data['grid']['w_grid'],
-            "S_grid": torch.from_numpy(data['background']) + \
-                global_mask * sim_experiment.Sqw,
+            "S_grid": torch.from_numpy(Sqw_syn),
             "S_scale_factor": 1.
         }
 
@@ -101,7 +166,7 @@ def main(cfg : DictConfig):
         steer = NeutronExperimentSteerer(
             model, particle_filter_config=particle_filter_config,
             mask_config=mask_config, experiment_config=experiment_config, background_config=background_config,
-            tqdm_pbar=False, lkhd_dict=cfg['likelihood'], device=device)
+            tqdm_pbar=False, lkhd_dict=cfg['likelihood'], device='cuda')
             
         mean_list = [steer.particle_filter.mean().detach().cpu().clone()]
         std_list = [steer.particle_filter.std().detach().cpu().clone()]

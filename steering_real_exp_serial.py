@@ -64,11 +64,16 @@ def main(cfg : DictConfig):
         data['background']
     )
 
-    particle_filter_config = {
-        "num_particles": 1000,
-        "dim_particles": 2,
-        "prior_configs": {'types': ['uniform', 'uniform'], 'args': [{'low': 20, 'high': 40}, {'low': -5, 'high': 5}]}
-    }
+    if 'particle_filter' in cfg:
+        particle_filter_config = OmegaConf.to_container(cfg['particle_filter'], resolve=True)
+        print('loading particle filter from config file...')
+        print(particle_filter_config)
+    else:
+        particle_filter_config = {
+            "num_particles": 1000,
+            "dim_particles": 2,
+            "prior_configs": {'types': ['uniform', 'uniform'], 'args': [{'low': 20, 'high': 40}, {'low': -5, 'high': 5}]}
+        }
 
     grid_info = {
         k: [v.min().item(), v.max().item(), len(v)] for k,v in data['grid'].items()
@@ -105,7 +110,7 @@ def main(cfg : DictConfig):
 
 
 
-    for i_run in range(10):
+    for i_run in range(20):
 
         steer.reset()
 
