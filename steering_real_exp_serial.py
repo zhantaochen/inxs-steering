@@ -104,8 +104,9 @@ def main(cfg : DictConfig):
     model = SpecNeuralRepr.load_from_checkpoint(model_path).to(device)
 
     steer = NeutronExperimentSteerer(
-        model, particle_filter_config=particle_filter_config,
+        model, particle_filter_config=particle_filter_config, 
         mask_config=mask_config, experiment_config=experiment_config, background_config=background_config,
+        use_utility_sf=cfg['utility']['use_utility_sf'], utility_sf=cfg['utility']['utility_sf_sigma'],
         tqdm_pbar=False, lkhd_dict=cfg['likelihood'], device='cuda')
 
 
@@ -126,10 +127,10 @@ def main(cfg : DictConfig):
         else:
             if cfg['steer']['mode'] == 'sequential':
                 steer_mode = 'custom'
-                angles = np.linspace(cfg['steer']['start'], cfg['steer']['end'], num_steps, endpoint=False)
+                angles = np.linspace(cfg['steer']['start'], cfg['steer']['end'], num_steps, endpoint=cfg['steer']['endpoint'])
             elif cfg['steer']['mode'] == 'random':
                 steer_mode = 'custom'
-                angles = np.linspace(cfg['steer']['start'], cfg['steer']['end'], num_steps, endpoint=False)
+                angles = np.linspace(cfg['steer']['start'], cfg['steer']['end'], num_steps, endpoint=cfg['steer']['endpoint'])
                 np.random.shuffle(angles)
             else:
                 steer_mode = cfg['steer']['mode']

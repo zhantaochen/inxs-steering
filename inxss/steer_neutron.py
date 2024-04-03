@@ -14,6 +14,7 @@ class NeutronExperimentSteerer:
         mask_config,
         experiment_config,
         background_config=None,
+        use_utility_sf=True,
         utility_sf_sigma=90.0,
         tqdm_pbar=True,
         lkhd_dict=None,
@@ -44,6 +45,7 @@ class NeutronExperimentSteerer:
         if self.background is not None:
             self.background.prepare_experiment(self.psi_mask.hklw_grid)
         
+        self.use_utility_sf = use_utility_sf
         self.utility_sf_sigma = utility_sf_sigma
         
         self.dtype = dtype
@@ -94,11 +96,13 @@ class NeutronExperimentSteerer:
     
     def compute_utility(self,):
         utility = self._compute_utility()
-        # utility_sf = torch.ones_like(utility)
-        if len(self.measured_angles_history) > 0:
-            utility_sf = self.compute_utility_scaling_factor(self.measured_angles_history[-1])
-        else:
+        if not self.use_utility_sf:
             utility_sf = torch.ones_like(utility)
+        else:
+            if len(self.measured_angles_history) > 0:
+                utility_sf = self.compute_utility_scaling_factor(self.measured_angles_history[-1])
+            else:
+                utility_sf = torch.ones_like(utility)
         return utility * utility_sf.to(utility)
         
     def compute_prediction_std_over_all_parameters(self,):
