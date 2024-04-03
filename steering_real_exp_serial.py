@@ -126,10 +126,10 @@ def main(cfg : DictConfig):
         else:
             if cfg['steer']['mode'] == 'sequential':
                 steer_mode = 'custom'
-                angles = np.linspace(cfg['steer']['start'], cfg['steer']['end'], num_steps)
+                angles = np.linspace(cfg['steer']['start'], cfg['steer']['end'], num_steps, endpoint=False)
             elif cfg['steer']['mode'] == 'random':
                 steer_mode = 'custom'
-                angles = np.linspace(cfg['steer']['start'], cfg['steer']['end'], num_steps)
+                angles = np.linspace(cfg['steer']['start'], cfg['steer']['end'], num_steps, endpoint=False)
                 np.random.shuffle(angles)
             else:
                 steer_mode = cfg['steer']['mode']
