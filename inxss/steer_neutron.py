@@ -154,7 +154,7 @@ class NeutronExperimentSteerer:
         utility = self.compute_utility()
         optimal_psi = self.psi_mask.psi_grid[utility.argmax()]
         
-        self.utility_history.append(utility.cpu().numpy().squeeze())
+        self.utility_history.append(utility.clone().cpu().numpy().squeeze())
         self.measured_angles_history.append(optimal_psi.cpu().numpy())
         return optimal_psi
     
@@ -165,7 +165,7 @@ class NeutronExperimentSteerer:
         
         good_psi = self.psi_mask.psi_grid[idx]
         
-        self.utility_history.append(utility.cpu().numpy().squeeze())
+        self.utility_history.append(utility.clone().cpu().numpy().squeeze())
         self.measured_angles_history.append(good_psi.cpu().numpy())
         return good_psi
     
@@ -179,7 +179,7 @@ class NeutronExperimentSteerer:
             psi_candidate = self.psi_mask.psi_grid[index]
             if psi_candidate.cpu().numpy() not in self.measured_angles_history:
                 
-                self.utility_history.append(utility.cpu().numpy().squeeze())
+                self.utility_history.append(utility.clone().cpu().numpy().squeeze())
                 self.measured_angles_history.append(psi_candidate.cpu().numpy())  # Store the newly measured angle
                 return psi_candidate
 

@@ -166,7 +166,7 @@ def main(cfg : DictConfig):
         steer = NeutronExperimentSteerer(
             model, particle_filter_config=particle_filter_config,
             mask_config=mask_config, experiment_config=experiment_config, background_config=background_config,
-            use_utility_sf=cfg['utility']['use_utility_sf'], utility_sf=cfg['utility']['utility_sf_sigma'],
+            use_utility_sf=cfg['utility']['use_utility_sf'], utility_sf_sigma=cfg['utility']['utility_sf_sigma'],
             tqdm_pbar=False, lkhd_dict=cfg['likelihood'], device='cuda')
             
         mean_list = [steer.particle_filter.mean().detach().cpu().clone()]
