@@ -52,7 +52,7 @@ class SimulatedExperiment:
 
 class NeutronExperiment:
 
-    def __init__(self, q_grid, w_grid, S_grid, S_scale_factor=1.):
+    def __init__(self, q_grid, w_grid, S_grid, S_scale_factor=1., poisson=False):
         """
         q_grid: tuple of (h_grid, k_grid, l_grid), each of shape (num_qi) for i = h,k,l
         w_grid: array of shape (num_w,)
@@ -63,6 +63,7 @@ class NeutronExperiment:
         self.l_grid = convert_to_torch(q_grid[2])
         self.w_grid = convert_to_torch(w_grid)
 
+        self.poisson = poisson
         self.S_scale_factor = S_scale_factor
 
         self.S_func = RegularGridInterpolator(
@@ -75,8 +76,13 @@ class NeutronExperiment:
         self.Sqw = torch.from_numpy(self.get_measurements_on_coords(coords))
         self.Sqw = self.Sqw.clamp_min(0.0)
     
-    def get_measurements_by_mask(self, mask):
-        S_out = self.Sqw[mask]
+    def get_measurements_by_mask(self, mask, poisson=None):
+        if poisson is None:
+            poisson = self.poisson
+            
+        S_out = self.S_scale_factor * self.Sqw[mask]
+        if poisson:
+            S_out = torch.poisson(S_out)
         return S_out
     
     def get_measurements_on_coords(self, coords):

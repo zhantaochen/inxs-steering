@@ -88,12 +88,32 @@ def main(cfg : DictConfig):
         "global_mask": data['S']>0
     }
 
-    experiment_config = {
-        "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
-        "w_grid": data['grid']['w_grid'],
-        "S_grid": data['S'],
-        "S_scale_factor": 1.
-    }
+    # experiment_config = {
+    #     "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
+    #     "w_grid": data['grid']['w_grid'],
+    #     "S_grid": data['S'],
+    #     "S_scale_factor": 1.
+    # }
+    
+    if hasattr(cfg, 'experiment_config'):
+        _experiment_config = OmegaConf.to_container(cfg['experiment_config'], resolve=True)
+        print('loading experiment config from config file...')
+        print(_experiment_config)
+        experiment_config = {
+            "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
+            "w_grid": data['grid']['w_grid'],
+            "S_grid": data['S'],
+            "S_scale_factor": _experiment_config["S_scale_factor"],
+            "poisson": _experiment_config["poisson"]
+        }
+    else:
+        experiment_config = {
+            "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
+            "w_grid": data['grid']['w_grid'],
+            "S_grid": data['S'],
+            "S_scale_factor": 1.,
+            "poisson": False
+        }
 
     background_config = {
         "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
