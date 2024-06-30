@@ -25,7 +25,7 @@ from inxss.steer_neutron import NeutronExperimentSteerer
 
 import hydra
 
-@hydra.main(version_base=None, config_path="conf")
+@hydra.main(version_base=None, config_path="conf/final")
 def main(cfg : DictConfig):
     num_steps = cfg['general']['num_steps']
 
@@ -33,16 +33,16 @@ def main(cfg : DictConfig):
     likelihood_type = cfg['likelihood']['type']
 
 
-    time_stamp = datetime.now().strftime("%Y%m%d-%H%M")
+    time_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     if cfg['likelihood']['type'] == 'gaussian':
         output_path = os.path.join(
             cfg['paths']['output_path'],
-            f"EXP_lkhd_{likelihood_type}_std_{cfg['likelihood']['std']}_scaled_{scale_likelihood}_steps_{num_steps}_{time_stamp}"
+            f"EXP_lkhd_{likelihood_type}_std_{cfg['likelihood']['std']}_scaled_{scale_likelihood}_steps_{num_steps}_{time_stamp}_{cfg['general']['name']}"
         )
     else:
         output_path = os.path.join(
             cfg['paths']['output_path'],
-            f"EXP_lkhd_{likelihood_type}_scaled_{scale_likelihood}_steps_{num_steps}_{time_stamp}"
+            f"EXP_lkhd_{likelihood_type}_scaled_{scale_likelihood}_steps_{num_steps}_{time_stamp}_{cfg['general']['name']}"
         )
     if 'steer' in cfg:
         output_path = output_path + f"_steer_{cfg['steer']['mode']}_{cfg['steer']['start']}_{cfg['steer']['end']}_{num_steps}"

@@ -19,7 +19,7 @@ torch.set_default_dtype(torch.float32)
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-@hydra.main(version_base=None, config_path="conf")
+@hydra.main(version_base=None, config_path="conf/final")
 def main(cfg : DictConfig):
     spinw_data = torch.load(cfg['paths']['spinw_data_path'])
 
@@ -34,16 +34,16 @@ def main(cfg : DictConfig):
     likelihood_type = cfg['likelihood']['type']
 
 
-    time_stamp = datetime.now().strftime("%Y%m%d-%H%M")
+    time_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     if cfg['likelihood']['type'] == 'gaussian':
         output_path = os.path.join(
             cfg['paths']['output_path'],
-            f"lkhd_{likelihood_type}_std_{cfg['likelihood']['std']}_scaled_{scale_likelihood}_steps_{num_steps}_{time_stamp}"
+            f"lkhd_{likelihood_type}_std_{cfg['likelihood']['std']}_scaled_{scale_likelihood}_steps_{num_steps}_{time_stamp}_{cfg['general']['name']}"
         )
     else:
         output_path = os.path.join(
             cfg['paths']['output_path'],
-            f"lkhd_{likelihood_type}_scaled_{scale_likelihood}_steps_{num_steps}_{time_stamp}"
+            f"lkhd_{likelihood_type}_scaled_{scale_likelihood}_steps_{num_steps}_{time_stamp}_{cfg['general']['name']}"
         )
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -148,12 +148,38 @@ def main(cfg : DictConfig):
         Sqw_syn[mask_out] = s_pred_masked_sm_out[mask_out] * interped_scales[mask_out]
         Sqw_syn += data['background']
 
-        experiment_config = {
-            "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
-            "w_grid": data['grid']['w_grid'],
-            "S_grid": torch.from_numpy(Sqw_syn),
-            "S_scale_factor": 1.
-        }
+        # experiment_config = {
+        #     "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
+        #     "w_grid": data['grid']['w_grid'],
+        #     "S_grid": torch.from_numpy(Sqw_syn),
+        #     "S_scale_factor": 1.
+        # }
+        
+        if hasattr(cfg, 'experiment_config'):
+            _experiment_config = OmegaConf.to_container(cfg['experiment_config'], resolve=True)
+            print('loading experiment config from config file...')
+            print(_experiment_config)
+            experiment_config = {
+                "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
+                "w_grid": data['grid']['w_grid'],
+                "S_grid": torch.from_numpy(Sqw_syn),
+                "S_scale_factor": _experiment_config["S_scale_factor"],
+                "poisson": _experiment_config["poisson"]
+            }
+        else:
+            # experiment_config = {
+            #     "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
+            #     "w_grid": data['grid']['w_grid'],
+            #     "S_grid": torch.from_numpy(Sqw_syn),
+            #     "S_scale_factor": 1.
+            # }
+            experiment_config = {
+                "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),
+                "w_grid": data['grid']['w_grid'],
+                "S_grid": torch.from_numpy(Sqw_syn),
+                "S_scale_factor": 1.,
+                "poisson": False
+            }
 
         background_config = {
             "q_grid": tuple([data['grid'][_grid] for _grid in ['h_grid', 'k_grid', 'l_grid']]),

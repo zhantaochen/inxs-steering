@@ -6,3 +6,6 @@ paper_preparation/
 slurm_bash/
 outputs/
 *.pyc
+
+slurm_bash/temp
+conf/temp
