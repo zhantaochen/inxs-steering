@@ -9,3 +9,5 @@ outputs/
 
 slurm_bash/temp
 conf/temp
+
+models/

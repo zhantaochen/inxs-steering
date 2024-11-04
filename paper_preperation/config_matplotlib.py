@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+import matplotlib as mpl
 
 import seaborn as sns
 
@@ -29,7 +30,10 @@ import seaborn as sns
 # Set the custom color cycle using rcParams
 def config_matplotlib():
     
-    plt.style.use('seaborn-deep')
+    try:
+        plt.style.use('seaborn-deep')
+    except OSError:
+        plt.style.use('seaborn-v0_8-deep')
     
     # plt.rc('font', family='Dejavu Sans')
     plt.rcParams["mathtext.fontset"] = "dejavuserif"
@@ -38,10 +42,20 @@ def config_matplotlib():
     # Define a custom colormap
     # custom_cmap_name = "custom_cmap"
     # custom_cmap = LinearSegmentedColormap.from_list(custom_cmap_name, rgb_values_cmap)
+    
     cmap = sns.color_palette("ch:start=.5,rot=-.5", as_cmap=True)
     
     # Register the colormap with matplotlib
-    plt.register_cmap(cmap=cmap)
+    try:
+        try:
+            plt.register_cmap(cmap=cmap)
+        except ValueError:
+            pass
+    except AttributeError:
+        try:
+            mpl.colormaps.register(cmap=cmap)
+        except ValueError:
+            pass
     print(f'\nregistered cmap: {cmap.name}\n')
 
     SMALL_SIZE = 10

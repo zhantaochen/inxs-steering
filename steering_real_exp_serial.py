@@ -32,17 +32,18 @@ def main(cfg : DictConfig):
     scale_likelihood = cfg['likelihood']['scale']
     likelihood_type = cfg['likelihood']['type']
 
+    scale_utility = cfg['utility']['use_utility_sf']
 
     time_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     if cfg['likelihood']['type'] == 'gaussian':
         output_path = os.path.join(
             cfg['paths']['output_path'],
-            f"EXP_lkhd_{likelihood_type}_std_{cfg['likelihood']['std']}_scaled_{scale_likelihood}_steps_{num_steps}_{time_stamp}_{cfg['general']['name']}"
+            f"EXP_lkhd_{likelihood_type}_std_{cfg['likelihood']['std']}_scaledLkhd_{scale_likelihood}_scaledUF_{scale_utility}_steps_{num_steps}_{time_stamp}_{cfg['general']['name']}"
         )
     else:
         output_path = os.path.join(
             cfg['paths']['output_path'],
-            f"EXP_lkhd_{likelihood_type}_scaled_{scale_likelihood}_steps_{num_steps}_{time_stamp}_{cfg['general']['name']}"
+            f"EXP_lkhd_{likelihood_type}_scaledLkhd_{scale_likelihood}_scaledUF_{scale_utility}_steps_{num_steps}_{time_stamp}_{cfg['general']['name']}"
         )
     if 'steer' in cfg:
         output_path = output_path + f"_steer_{cfg['steer']['mode']}_{cfg['steer']['start']}_{cfg['steer']['end']}_{num_steps}"
@@ -152,6 +153,9 @@ def main(cfg : DictConfig):
                 steer_mode = 'custom'
                 angles = np.linspace(cfg['steer']['start'], cfg['steer']['end'], num_steps, endpoint=cfg['steer']['endpoint'])
                 np.random.shuffle(angles)
+            elif cfg['steer']['mode'] == 'optimal':
+                steer_mode = 'optimal'
+                angles = [None,] * num_steps
             else:
                 steer_mode = cfg['steer']['mode']
                 angles = [None,] * num_steps
